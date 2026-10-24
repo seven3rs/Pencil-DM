@@ -97,7 +97,8 @@ impl RpcClient {
 
     /// Queue a download. Only plain network URLs are accepted.
     pub async fn add_uri(&self, uri: &str) -> Result<String> {
-        self.add_uri_with_options(uri, &DownloadOptions::default()).await
+        self.add_uri_with_options(uri, &DownloadOptions::default())
+            .await
     }
 
     /// Queue a download with request metadata that applies only to this URI.
@@ -193,7 +194,9 @@ fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<Strin
     let mut rendered_headers = Vec::with_capacity(headers.len());
     for (name, value) in headers {
         if name.is_empty()
-            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
             || value.contains('\r')
             || value.contains('\n')
             || value.contains('\0')

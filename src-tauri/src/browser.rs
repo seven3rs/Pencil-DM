@@ -8,6 +8,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tauri::Manager;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use url::Url;
 
@@ -116,9 +117,8 @@ pub fn start(app: tauri::AppHandle, data_dir: &Path) -> Result<BrowserState, Str
 
     // Extensions cannot read the app's private data file. This loopback-only discovery
     // socket reveals only the ephemeral port; all useful operations still need the token.
-    let discovery = Server::http(("127.0.0.1", DISCOVERY_PORT)).map_err(|e| {
-        format!("browser discovery port {DISCOVERY_PORT} is unavailable: {e}")
-    })?;
+    let discovery = Server::http(("127.0.0.1", DISCOVERY_PORT))
+        .map_err(|e| format!("browser discovery port {DISCOVERY_PORT} is unavailable: {e}"))?;
     std::thread::Builder::new()
         .name("pdm-browser-discovery".into())
         .spawn(move || {
@@ -252,7 +252,10 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
     }
 
     if method == Method::Get && path == "/v1/ping" {
-        let _ = req.respond(json_response(200, "{\"ok\":true,\"message\":\"connected\"}"));
+        let _ = req.respond(json_response(
+            200,
+            "{\"ok\":true,\"message\":\"connected\"}",
+        ));
         return;
     }
     if method != Method::Post || (path != "/v1/download" && path != "/v1/batch") {
@@ -430,11 +433,7 @@ pub fn validate_download(item: &DownloadRequest) -> Result<(), String> {
 }
 
 fn validate_optional_header(value: &str, max: usize, name: &str) -> Result<(), String> {
-    if value.len() > max
-        || value.contains('\r')
-        || value.contains('\n')
-        || value.contains('\0')
-    {
+    if value.len() > max || value.contains('\r') || value.contains('\n') || value.contains('\0') {
         return Err(format!("invalid {name}"));
     }
     Ok(())
@@ -449,9 +448,7 @@ fn check_body_size(declared: Option<usize>, actual: usize) -> Result<(), (u16, &
 }
 
 fn pairing_code_valid(pairing: Option<&Pairing>, code: &str, now: Instant) -> bool {
-    pairing.is_some_and(|pairing| {
-        pairing.expires > now && constant_time_eq(&pairing.code, code)
-    })
+    pairing.is_some_and(|pairing| pairing.expires > now && constant_time_eq(&pairing.code, code))
 }
 
 fn token_authorized(header: Option<&str>, token: &str) -> bool {
@@ -471,10 +468,12 @@ fn valid_extension_origin(origin: &str) -> bool {
     matches!(scheme, "chrome-extension" | "moz-extension")
         && !host.is_empty()
         && host.len() <= 220
-        && host.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
-fn header(req: &Request, name: &str) -> Option<String> {
+fn header(req: &Request, name: &'static str) -> Option<String> {
     req.headers()
         .iter()
         .find(|header| header.field.equiv(name))
@@ -492,9 +491,7 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 fn json_response(status: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body.to_string())
         .with_status_code(StatusCode(status))
-        .with_header(
-            Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
-        )
+        .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
 }
 
 fn error_response(status: u16, message: &str) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -547,7 +544,9 @@ mod tests {
         assert!(token_authorized(Some("Bearer secret"), "secret"));
         assert!(!token_authorized(Some("Bearer wrong"), "secret"));
         assert!(!token_authorized(None, "secret"));
-        assert!(valid_extension_origin("chrome-extension://abcdefghijklmnop"));
+        assert!(valid_extension_origin(
+            "chrome-extension://abcdefghijklmnop"
+        ));
         assert!(valid_extension_origin("moz-extension://abcdefghijklmnop"));
         assert!(!valid_extension_origin("https://example.test"));
         assert!(origin_allowed(
@@ -587,6 +586,10 @@ mod tests {
             Instant::now() + Duration::from_secs(301)
         ));
         security.pairing = None;
-        assert!(!pairing_code_valid(security.pairing.as_ref(), &code, Instant::now()));
+        assert!(!pairing_code_valid(
+            security.pairing.as_ref(),
+            &code,
+            Instant::now()
+        ));
     }
 }

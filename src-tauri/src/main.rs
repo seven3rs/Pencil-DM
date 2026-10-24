@@ -5,8 +5,8 @@ use pdm_engine::{
     EngineSource, LaunchOptions, RpcClient,
 };
 use serde_json::json;
-mod store;
 mod browser;
+mod store;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
@@ -22,7 +22,7 @@ struct AppState {
     /// Owns the child process so it can be shut down on exit.
     process: Mutex<Option<EngineProcess>>,
     db: Mutex<Option<Connection>>,
-    browser: Mutex<Option<browser::BrowserState>>,
+    browser: std::sync::Mutex<Option<browser::BrowserState>>,
 }
 
 impl AppState {
@@ -404,7 +404,7 @@ fn main() {
             let db = store::open(&data_root().join("pencil.db")).ok();
             app.manage(AppState {
                 db: Mutex::new(db),
-                browser: Mutex::new(None),
+                browser: std::sync::Mutex::new(None),
                 ..AppState::default()
             });
             let browser = browser::start(app.handle().clone(), &data_root())
