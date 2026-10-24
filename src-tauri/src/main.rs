@@ -404,7 +404,9 @@ async fn set_setting(
         &value,
     )?;
     if key == "minimize_to_tray" {
-        state.minimize_to_tray.store(value == "true", Ordering::SeqCst);
+        state
+            .minimize_to_tray
+            .store(value == "true", Ordering::SeqCst);
     }
     Ok(())
 }
@@ -754,8 +756,7 @@ async fn scheduler_loop(app: tauri::AppHandle) {
 
 fn looks_like_download_url(value: &str) -> bool {
     let value = value.trim();
-    url::Url::parse(value)
-        .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "ftp"))
+    url::Url::parse(value).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "ftp"))
 }
 
 fn url_from_argument(value: &str) -> Option<String> {
@@ -1000,7 +1001,10 @@ fn read_dropped_links(paths: Vec<String>) -> Result<Vec<String>, String> {
 fn open_third_party_notices(app: tauri::AppHandle) -> Result<(), String> {
     let path = app
         .path()
-        .resolve("THIRD_PARTY_NOTICES.md", tauri::path::BaseDirectory::Resource)
+        .resolve(
+            "THIRD_PARTY_NOTICES.md",
+            tauri::path::BaseDirectory::Resource,
+        )
         .map_err(|e| e.to_string())?;
     app.opener()
         .open_path(path.to_string_lossy().into_owned(), None::<&str>)
@@ -1057,9 +1061,9 @@ async fn clipboard_monitor_loop(app: tauri::AppHandle) {
             db.as_ref()
                 .and_then(|conn| store::settings(conn).ok())
                 .map(|items| {
-                    items.iter().any(|(key, value)| {
-                        key == "clipboard_monitor_enabled" && value == "true"
-                    })
+                    items
+                        .iter()
+                        .any(|(key, value)| key == "clipboard_monitor_enabled" && value == "true")
                 })
                 .unwrap_or(false)
         };
