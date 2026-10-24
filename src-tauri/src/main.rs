@@ -8,15 +8,15 @@ use serde_json::json;
 mod browser;
 mod scheduler;
 mod store;
+use chrono::{Datelike, Utc};
 use rusqlite::Connection;
+use sha2::Digest;
 use std::path::PathBuf;
-use chrono::Utc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use sha2::Digest;
-use tokio::io::AsyncReadExt;
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock};
 
 const APP_DIR_NAME: &str = "strs.pencil.downloadmanager";
@@ -519,7 +519,12 @@ async fn hash_file<D: Digest + Default>(path: &str) -> Result<String, String> {
         if count == 0 { break; }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(""))
 }
 
 #[rustfmt::skip]

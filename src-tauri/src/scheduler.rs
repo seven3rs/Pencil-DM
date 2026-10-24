@@ -90,7 +90,10 @@ pub fn next_event(now: DateTime<Utc>, rules: &[ScheduleRule]) -> Option<Schedule
                     kind,
                     speed_limit: rule.speed_limit,
                 };
-                if best.as_ref().is_none_or(|current| candidate.at < current.at) {
+                if best
+                    .as_ref()
+                    .is_none_or(|current| candidate.at < current.at)
+                {
                     best = Some(candidate);
                 }
             }
@@ -121,7 +124,10 @@ mod tests {
     fn finds_next_event_in_rule_timezone() {
         let now = Utc.with_ymd_and_hms(2026, 1, 5, 8, 0, 0).unwrap();
         let event = next_event(now, &[rule("America/New_York", 1, "09:00", "10:00")]).unwrap();
-        assert_eq!(event.at, Utc.with_ymd_and_hms(2026, 1, 5, 14, 0, 0).unwrap());
+        assert_eq!(
+            event.at,
+            Utc.with_ymd_and_hms(2026, 1, 5, 14, 0, 0).unwrap()
+        );
         assert_eq!(event.kind, ScheduleEventKind::Start);
     }
 
@@ -147,6 +153,9 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 11, 1, 4, 0, 0).unwrap();
         let event = next_event(now, &[rule("America/New_York", 7, "01:30", "03:00")]).unwrap();
         assert_eq!(event.kind, ScheduleEventKind::Start);
-        assert_eq!(event.at, Utc.with_ymd_and_hms(2026, 11, 1, 5, 30, 0).unwrap());
+        assert_eq!(
+            event.at,
+            Utc.with_ymd_and_hms(2026, 11, 1, 5, 30, 0).unwrap()
+        );
     }
 }

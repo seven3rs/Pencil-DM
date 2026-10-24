@@ -158,8 +158,11 @@ impl RpcClient {
         gid: &str,
         bytes_per_second: Option<u64>,
     ) -> Result<()> {
-        self.change_option(gid, speed_limit_options("max-download-limit", bytes_per_second))
-            .await
+        self.change_option(
+            gid,
+            speed_limit_options("max-download-limit", bytes_per_second),
+        )
+        .await
     }
 
     pub async fn pause(&self, gid: &str) -> Result<()> {
@@ -199,10 +202,7 @@ impl RpcClient {
     }
 }
 
-fn speed_limit_options(
-    key: &str,
-    bytes_per_second: Option<u64>,
-) -> serde_json::Map<String, Value> {
+fn speed_limit_options(key: &str, bytes_per_second: Option<u64>) -> serde_json::Map<String, Value> {
     let mut options = serde_json::Map::new();
     options.insert(key.into(), json!(bytes_per_second.unwrap_or(0).to_string()));
     options
