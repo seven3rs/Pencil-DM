@@ -1,0 +1,19 @@
+{
+  "version": "1.37.0",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
+      "sha256": "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+      "extract_dir": "aria2-1.37.0-win-64bit-build1",
+      "bin": "aria2c.exe",
+      "bin_sha256": "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
+    },
+    "windows-x86": {
+      "url": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-32bit-build1.zip",
+      "sha256": "35f6514cc5dd7e98a87b3c4c2d25a0754b9b063dbe59bc0f22d483464f61e5b6",
+      "extract_dir": "aria2-1.37.0-win-32bit-build1",
+      "bin": "aria2c.exe",
+      "bin_sha256": "b9cd71b275af11b63c33457b0f43f2f2675937070c563e195f223efd7fa4c74b"
+    }
+  }
+}

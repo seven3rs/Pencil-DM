@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pencil Download Manager</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <h1>Pencil Download Manager</h1>
+      </div>
+      <span id="engine-badge" class="badge starting">Starting…</span>
+    </header>
+
+    <form id="add-form" autocomplete="off">
+      <input id="url" type="text" placeholder="Paste a download link (http, https, ftp)" spellcheck="false" />
+      <button type="submit" id="add-btn">Download</button>
+    </form>
+    <p id="message" role="status"></p>
+
+    <main>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="num">Size</th>
+            <th class="progress-col">Progress</th>
+            <th class="num">Speed</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty">No downloads yet. Paste a link above to start.</p>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
