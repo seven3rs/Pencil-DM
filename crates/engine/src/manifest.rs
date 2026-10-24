@@ -63,6 +63,23 @@ impl EngineManifest {
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
             .user_agent(concat!("PencilDownloadManager/", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    return attempt.error("too many release metadata redirects");
+                }
+                let target = attempt.url();
+                if target.scheme() != "https"
+                    || !target.username().is_empty()
+                    || target.password().is_some()
+                {
+                    return attempt.error("unsafe release metadata redirect");
+                }
+                if matches!(target.host_str(), Some("api.github.com" | "github.com")) {
+                    attempt.follow()
+                } else {
+                    attempt.error("untrusted release metadata redirect host")
+                }
+            }))
             .build()
         {
             Ok(client) => client,
@@ -103,8 +120,18 @@ impl EngineManifest {
             return bad(format!("bad version string: {:?}", self.version));
         }
         for (key, e) in &self.platforms {
-            if !e.url.starts_with("https://") {
-                return bad(format!("{key}: url must be https"));
+            let parsed_url = match reqwest::Url::parse(&e.url) {
+                Ok(url) => url,
+                Err(_) => return bad(format!("{key}: invalid engine URL")),
+            };
+            if parsed_url.scheme() != "https"
+                || parsed_url.host_str().is_none()
+                || !parsed_url.username().is_empty()
+                || parsed_url.password().is_some()
+            {
+                return bad(format!(
+                    "{key}: url must be an HTTPS URL without embedded credentials"
+                ));
             }
             for (name, h) in [("sha256", &e.sha256), ("bin_sha256", &e.bin_sha256)] {
                 if h.len() != 64 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -177,12 +204,35 @@ pub fn version_at_least(found: &[u64], minimum: &[u64]) -> bool {
 }
 
 fn is_safe_relative(p: &str) -> bool {
-    if p.is_empty() {
+    if p.is_empty()
+        || p.starts_with('/')
+        || p.starts_with('\\')
+        || p.contains('\\')
+        || p.contains(':')
+        || p.chars().any(char::is_control)
+    {
         return false;
     }
     Path::new(p)
         .components()
         .all(|c| matches!(c, Component::Normal(_)))
+        && p.split('/').all(|part| {
+            if part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.ends_with('.')
+                || part.ends_with(' ')
+            {
+                return false;
+            }
+            let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+            !matches!(
+                stem.as_str(),
+                "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4"
+                    | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2"
+                    | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+            )
+        })
 }
 
 #[cfg(test)]
@@ -215,6 +265,45 @@ mod tests {
     }
 
     #[test]
+    fn manifest_validation_rejects_malformed_generated_paths_and_digests() {
+        let digest = "0".repeat(64);
+        let unsafe_paths = [
+            "../engine",
+            "a/../engine",
+            "\\\\server\\share",
+            "C:\\engine.exe",
+            "/tmp/engine",
+            "CON.exe",
+            "folder\\engine.exe",
+        ];
+        for path in unsafe_paths {
+            let json = serde_json::json!({
+                "version": "1.0.0", "min_system_version": "1.36.0",
+                "platforms": {"test": {
+                    "url": "https://github.com/example/engine.zip",
+                    "sha256": digest,
+                    "bin": path,
+                    "bin_sha256": digest
+                }}
+            }).to_string();
+            assert!(EngineManifest::parse(&json).is_err(), "accepted manifest path {path:?}");
+        }
+        for malformed in ["", "not-json", "{", "null", "[]", r#"{"version":1}"#] {
+            assert!(
+                EngineManifest::parse(malformed).is_err(),
+                "accepted malformed manifest {malformed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stable_release_tags_reject_suffixes_and_non_numeric_components() {
+        for tag in ["release-1.2.3-rc1", "v1..2", "1.2.x", "https://evil.test/1.2.3", ""] {
+            assert!(parse_release_tag(tag).is_none(), "accepted release tag {tag:?}");
+        }
+    }
+
+    #[test]
     fn rejects_invalid_minimum_system_version() {
         let json = r#"{"version":"1","min_system_version":"latest","platforms":{}}"#;
         assert!(EngineManifest::parse(json).is_err());
@@ -226,6 +315,13 @@ mod tests {
             "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
             "bin":"a.exe","bin_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
         assert!(EngineManifest::parse(json).is_err());
+    }
+
+    #[test]
+    fn rejects_manifest_urls_with_embedded_credentials() {
+        let digest = "0".repeat(64);
+        let json = format!(r#"{{"version":"1","min_system_version":"1.36.0","platforms":{{"k":{{"url":"https://user:pass@example.test/a.zip","sha256":"{digest}","bin":"engine.exe","bin_sha256":"{digest}"}}}}}}"#);
+        assert!(EngineManifest::parse(&json).is_err());
     }
 
     #[test]

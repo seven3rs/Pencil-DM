@@ -176,8 +176,12 @@ async fn start_engine(app: tauri::AppHandle) {
         let _ = app.emit("engine-progress", json!({ "done": done, "total": total }));
     })
     .await;
-    let bin = match source {
-        Ok(EngineSource::Managed(p)) | Ok(EngineSource::System(p)) => p,
+    let (bin, expected_sha256) = match source {
+        Ok(EngineSource::Managed(p)) => (
+            p,
+            manifest.entry_for_current().map(|entry| entry.bin_sha256.clone()),
+        ),
+        Ok(EngineSource::System(p)) => (p, None),
         Err(pdm_engine::EngineError::NotFound) => {
             let (detail, command) = missing_engine_instructions();
             let _ = app.emit(
@@ -197,6 +201,7 @@ async fn start_engine(app: tauri::AppHandle) {
         bin,
         download_dir: dirs::download_dir().unwrap_or_else(|| data_root().join("downloads")),
         session_file: data_root().join("session.dat"),
+        expected_sha256,
     };
     match EngineProcess::spawn(opts).await {
         Ok(process) => {

@@ -179,6 +179,17 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
     let method = req.method().clone();
     let origin = header(&req, "Origin");
     let auth = header(&req, "Authorization");
+    let host_ok = header(&req, "Host").is_some_and(|host| {
+        let Ok(security) = state.0.lock() else {
+            return false;
+        };
+        host == format!("127.0.0.1:{}", security.port)
+            || host == format!("localhost:{}", security.port)
+    });
+    if !host_ok {
+        let _ = req.respond(error_response(403, "invalid Host header"));
+        return;
+    }
     if !allow_rate(state) {
         let _ = req.respond(error_response(429, "rate limit exceeded"));
         return;
@@ -391,14 +402,7 @@ pub fn validate_download(item: &DownloadRequest) -> Result<(), String> {
         validate_optional_header(user_agent, 1024, "user-agent")?;
     }
     if let Some(file_name) = &item.file_name {
-        if file_name.len() > 255
-            || file_name.is_empty()
-            || file_name == "."
-            || file_name == ".."
-            || file_name.contains('/')
-            || file_name.contains('\\')
-            || file_name.chars().any(char::is_control)
-        {
+        if !safe_download_name(file_name) {
             return Err("invalid file name".into());
         }
     }
@@ -432,6 +436,35 @@ pub fn validate_download(item: &DownloadRequest) -> Result<(), String> {
     Ok(())
 }
 
+fn safe_download_name(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 240
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.contains(':')
+        || value.chars().any(|c| {
+            c.is_control()
+                || matches!(
+                    c,
+                    '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        || value.ends_with('.')
+        || value.ends_with(' ')
+    {
+        return false;
+    }
+    let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
+            | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
+            | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    )
+}
+
 fn validate_optional_header(value: &str, max: usize, name: &str) -> Result<(), String> {
     if value.len() > max || value.contains('\r') || value.contains('\n') || value.contains('\0') {
         return Err(format!("invalid {name}"));
@@ -458,7 +491,7 @@ fn token_authorized(header: Option<&str>, token: &str) -> bool {
 }
 
 fn origin_allowed(origin: Option<&str>, paired: Option<&str>) -> bool {
-    origin.is_none_or(|origin| paired == Some(origin))
+    origin.is_some_and(|origin| paired == Some(origin))
 }
 
 fn valid_extension_origin(origin: &str) -> bool {
@@ -532,6 +565,11 @@ mod tests {
         item.file_name = Some("../evil".into());
         assert!(validate_download(&item).is_err());
         item.file_name = None;
+        for name in ["CON.txt", "file.", "file ", "bad\u{202e}exe", "C:evil.txt"] {
+            item.file_name = Some(name.into());
+            assert!(validate_download(&item).is_err(), "accepted unsafe name {name:?}");
+        }
+        item.file_name = None;
         item.headers = Some(std::collections::HashMap::from([(
             "Host".into(),
             "attacker.test".into(),
@@ -558,6 +596,8 @@ mod tests {
             Some("chrome-extension://abcdefghijklmnop")
         ));
         assert!(!origin_allowed(Some("chrome-extension://evil"), None));
+        assert!(!origin_allowed(None, Some("chrome-extension://abcdefghijklmnop")));
+        assert!(!origin_allowed(None, None));
     }
 
     #[test]

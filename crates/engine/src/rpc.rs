@@ -115,6 +115,11 @@ impl RpcClient {
                 parsed.scheme()
             )));
         }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(EngineError::Rpc(
+                "URLs containing embedded credentials are not allowed".into(),
+            ));
+        }
         let aria_options = build_aria_options(options)?;
         let mut params = vec![json!([parsed.as_str()])];
         if !aria_options.is_empty() {
@@ -223,13 +228,7 @@ fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<Strin
         aria_options.insert("user-agent".into(), json!(value));
     }
     if let Some(value) = options.file_name.as_deref().filter(|s| !s.is_empty()) {
-        if value.len() > 255
-            || value == "."
-            || value == ".."
-            || value.contains('/')
-            || value.contains('\\')
-            || value.chars().any(char::is_control)
-        {
+        if !safe_output_name(value) {
             return Err(EngineError::Rpc("invalid output file name".into()));
         }
         aria_options.insert("out".into(), json!(value));
@@ -256,6 +255,35 @@ fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<Strin
         aria_options.insert("header".into(), Value::Array(rendered_headers));
     }
     Ok(aria_options)
+}
+
+fn safe_output_name(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 240
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.contains(':')
+        || value.chars().any(|c| {
+            c.is_control()
+                || matches!(
+                    c,
+                    '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        || value.ends_with('.')
+        || value.ends_with(' ')
+    {
+        return false;
+    }
+    let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
+            | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
+            | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    )
 }
 
 fn parse_info(v: &Value) -> DownloadInfo {
@@ -333,6 +361,57 @@ mod tests {
         let info = parse_info(&v);
         assert_eq!(info.name, "https://a/b.zip");
         assert_eq!(info.path, "");
+    }
+
+    #[test]
+    fn rejects_platform_unsafe_output_names() {
+        let long_name = "x".repeat(241);
+        for name in [
+            "../x",
+            "a\\b",
+            "CON.txt",
+            "LPT9",
+            "trailing.",
+            "trailing ",
+            "bad\u{202e}exe",
+            "C:relative",
+            long_name.as_str(),
+        ] {
+            let options = DownloadOptions {
+                file_name: Some(name.into()),
+                ..DownloadOptions::default()
+            };
+            assert!(
+                build_aria_options(&options).is_err(),
+                "accepted unsafe filename {name:?}"
+            );
+        }
+        for name in ["report.pdf", "file name.zip", "résumé.txt"] {
+            let options = DownloadOptions {
+                file_name: Some(name.into()),
+                ..DownloadOptions::default()
+            };
+            assert!(
+                build_aria_options(&options).is_ok(),
+                "rejected valid filename {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn filename_validation_property_rejects_ascii_controls_and_separators() {
+        for byte in 0u8..=31 {
+            let candidate = format!("prefix{}suffix", char::from(byte));
+            assert!(!safe_output_name(&candidate), "accepted control byte {byte}");
+        }
+        for separator in ['/', '\\', ':'] {
+            let candidate = format!("prefix{separator}suffix");
+            assert!(!safe_output_name(&candidate), "accepted separator {separator:?}");
+        }
+        for suffix in ['.', ' '] {
+            let candidate = format!("filename{suffix}");
+            assert!(!safe_output_name(&candidate), "accepted unsafe suffix {suffix:?}");
+        }
     }
 
     #[test]
