@@ -75,12 +75,7 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
                 "exe,msi,msix,apk,deb,rpm,dmg,pkg,appimage",
                 "Programs",
             ),
-            (
-                "video",
-                "Video",
-                "mp4,mkv,avi,mov,webm,m4v,wmv",
-                "Video",
-            ),
+            ("video", "Video", "mp4,mkv,avi,mov,webm,m4v,wmv", "Video"),
             ("other", "Other", "", "Other"),
         ];
         for (id, name, extensions, dir) in categories {
@@ -100,18 +95,30 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
-pub fn save_snapshot(
-    conn: &Connection,
-    gid: &str,
-    url: &str,
-    file_name: &str,
-    save_dir: &str,
-    category: &str,
-    status: &str,
-    total: u64,
-    completed: u64,
-    error: Option<&str>,
-) -> Result<(), String> {
+pub struct DownloadSnapshot<'a> {
+    pub gid: &'a str,
+    pub url: &'a str,
+    pub file_name: &'a str,
+    pub save_dir: &'a str,
+    pub category: &'a str,
+    pub status: &'a str,
+    pub total: u64,
+    pub completed: u64,
+    pub error: Option<&'a str>,
+}
+
+pub fn save_snapshot(conn: &Connection, snapshot: DownloadSnapshot<'_>) -> Result<(), String> {
+    let DownloadSnapshot {
+        gid,
+        url,
+        file_name,
+        save_dir,
+        category,
+        status,
+        total,
+        completed,
+        error,
+    } = snapshot;
     let existing: Option<(i64, Option<i64>)> = conn
         .query_row(
             "SELECT added_at, finished_at FROM downloads WHERE gid=?1",
@@ -212,15 +219,17 @@ mod tests {
         );
         save_snapshot(
             &c,
-            "gid",
-            "https://example.test/a.zip",
-            "a.zip",
-            "/Downloads/Compressed",
-            "Compressed",
-            "complete",
-            100,
-            100,
-            None,
+            DownloadSnapshot {
+                gid: "gid",
+                url: "https://example.test/a.zip",
+                file_name: "a.zip",
+                save_dir: "/Downloads/Compressed",
+                category: "Compressed",
+                status: "complete",
+                total: 100,
+                completed: 100,
+                error: None,
+            },
         )
         .unwrap();
         let h = history(&c).unwrap();

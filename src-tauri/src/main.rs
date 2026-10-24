@@ -231,7 +231,20 @@ async fn add_download(state: tauri::State<'_, AppState>, url: String) -> Result<
     let rpc = state.rpc().await?;
     let gid = rpc.add_uri(&url).await.map_err(|e| e.to_string())?;
     if let Some(db) = state.db.lock().await.as_ref() {
-        let _ = store::save_snapshot(db, &gid, &url, "", "", "Other", "waiting", 0, 0, None);
+        let _ = store::save_snapshot(
+            db,
+            store::DownloadSnapshot {
+                gid: &gid,
+                url: &url,
+                file_name: "",
+                save_dir: "",
+                category: "Other",
+                status: "waiting",
+                total: 0,
+                completed: 0,
+                error: None,
+            },
+        );
     }
     Ok(gid)
 }
@@ -244,15 +257,17 @@ async fn list_downloads(state: tauri::State<'_, AppState>) -> Result<Vec<Downloa
         for item in &items {
             let _ = store::save_snapshot(
                 db,
-                &item.gid,
-                "",
-                &item.name,
-                &item.path,
-                "Other",
-                &item.status,
-                item.total,
-                item.completed,
-                item.error.as_deref(),
+                store::DownloadSnapshot {
+                    gid: &item.gid,
+                    url: "",
+                    file_name: &item.name,
+                    save_dir: &item.path,
+                    category: "Other",
+                    status: &item.status,
+                    total: item.total,
+                    completed: item.completed,
+                    error: item.error.as_deref(),
+                },
             );
         }
     }
