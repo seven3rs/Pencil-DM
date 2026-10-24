@@ -13,9 +13,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-autostart = "2"
-tauri-plugin-deep-link = "2"
-# Pin before 0.21.3: deep-link 2.6.2 initializes the older ParseOption shape.
-rust-ini = "=0.21.2"
+tauri-plugin-deep-link = "=2.6.1"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 chrono = "0.4"
