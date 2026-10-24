@@ -13,7 +13,7 @@ Pencil Download Manager is an early-stage cross-platform desktop download manage
 
 ## Engine setup
 
-The Windows installer installs the download engine from the embedded manifest, checks the downloaded archive SHA-256, safely extracts it, checks the binary SHA-256, and installs it in the app data directory. On launch, the managed binary is checked again and repaired if missing or modified. Linux packages currently declare the system engine as a package dependency.
+The Windows installer installs the download engine from the embedded manifest, checks the downloaded archive SHA-256, safely extracts it, checks the binary SHA-256, and installs it in the app data directory. On launch, the managed binary is checked again and repaired if missing or modified. On macOS and Linux, the app searches PATH and common executable locations for a system-installed download engine and checks against the latest stable upstream release when online, falling back to the embedded minimum version when offline. The requirement therefore advances automatically when upstream publishes a new stable release; package-manager availability may lag behind upstream. If none is found, the app displays platform-specific installation guidance. Users can also configure an absolute executable path in the app; this choice is stored in the app data directory. Linux packages continue to declare the system engine as a package dependency. See [engine installation](docs/engine-installation.md).
 
 The app controls the engine as a local child process over JSON-RPC bound to loopback with a per-launch random secret. Network-provided names and errors must always be rendered as text, never HTML.
 

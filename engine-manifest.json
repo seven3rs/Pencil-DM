@@ -15,5 +15,6 @@
       "bin": "aria2c.exe",
       "bin_sha256": "b9cd71b275af11b63c33457b0f43f2f2675937070c563e195f223efd7fa4c74b"
     }
-  }
+  },
+  "min_system_version": "1.36.0"
 }

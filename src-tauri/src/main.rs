@@ -2,7 +2,7 @@
 
 use pdm_engine::{
     resolve_engine, DownloadInfo, EngineManifest, EngineProcess, EngineSource, LaunchOptions,
-    RpcClient,
+    system_engine_is_compatible, RpcClient,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -40,6 +40,28 @@ fn engine_root() -> PathBuf {
     data_root().join("engine")
 }
 
+fn custom_engine_path() -> Option<PathBuf> {
+    std::fs::read_to_string(data_root().join("engine-path.txt"))
+        .ok()
+        .map(|value| PathBuf::from(value.trim()))
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+async fn resolve_app_engine<P>(
+    manifest: &EngineManifest,
+    progress: P,
+) -> pdm_engine::Result<EngineSource>
+where
+    P: Fn(u64, Option<u64>) + Send + Sync,
+{
+    if manifest.entry_for_current().is_some() {
+        return resolve_engine(&engine_root(), manifest, progress).await;
+    }
+    let mut dynamic_manifest = manifest.clone();
+    dynamic_manifest.refresh_system_minimum().await;
+    pdm_engine::resolve_system_engine(&dynamic_manifest, custom_engine_path().as_deref())
+}
+
 fn log_line(msg: &str) {
     use std::io::Write;
     let _ = std::fs::create_dir_all(data_root());
@@ -66,7 +88,7 @@ fn install_engine_cli() -> i32 {
     };
     let result = rt.block_on(async {
         let manifest = EngineManifest::embedded()?;
-        resolve_engine(&engine_root(), &manifest, |_, _| {}).await
+        resolve_app_engine(&manifest, |_, _| {}).await
     });
     match result {
         Ok(src) => {
@@ -78,6 +100,40 @@ fn install_engine_cli() -> i32 {
             1
         }
     }
+}
+
+fn missing_engine_instructions() -> (String, String) {
+    #[cfg(target_os = "macos")]
+    {
+        return (
+            "Install the download engine with Homebrew".into(),
+            "brew install aria2".into(),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+        let fedora_like = os_release.lines().any(|line| {
+            (line.starts_with("ID=")
+                && (line.contains("fedora")
+                    || line.contains("rhel")
+                    || line.contains("centos")))
+                || (line.starts_with("ID_LIKE=")
+                    && (line.contains("fedora") || line.contains("rhel")))
+        });
+        if fedora_like {
+            return (
+                "Install the download engine with your system package manager".into(),
+                "sudo dnf install aria2".into(),
+            );
+        }
+        return (
+            "Install the download engine with your system package manager".into(),
+            "sudo apt install aria2".into(),
+        );
+    }
+    #[allow(unreachable_code)]
+    ("The download engine is unavailable on this platform".into(), String::new())
 }
 
 async fn start_engine(app: tauri::AppHandle) {
@@ -93,12 +149,21 @@ async fn start_engine(app: tauri::AppHandle) {
 
     // Normally a no-op: the installer already set the engine up and this just
     // re-checks the binary's hash. If it is missing or modified it is repaired.
-    let source = resolve_engine(&engine_root(), &manifest, |done, total| {
+    let source = resolve_app_engine(&manifest, |done, total| {
         let _ = app.emit("engine-progress", json!({ "done": done, "total": total }));
     })
     .await;
     let bin = match source {
         Ok(EngineSource::Managed(p)) | Ok(EngineSource::System(p)) => p,
+        Err(pdm_engine::EngineError::NotFound) => {
+            let (detail, command) = missing_engine_instructions();
+            let _ = app.emit("engine-status", json!({
+                "state": "missing",
+                "detail": detail,
+                "command": command
+            }));
+            return;
+        }
         Err(e) => return emit_status("error", &e.to_string()),
     };
 
@@ -117,6 +182,38 @@ async fn start_engine(app: tauri::AppHandle) {
         }
         Err(e) => emit_status("error", &e.to_string()),
     }
+}
+
+#[tauri::command]
+async fn set_engine_path(path: String) -> Result<(), String> {
+    let mut manifest = EngineManifest::embedded().map_err(|e| e.to_string())?;
+    if manifest.entry_for_current().is_some() {
+        return Err("Custom system engine paths are available on macOS and Linux.".into());
+    }
+    manifest.refresh_system_minimum().await;
+    let candidate = PathBuf::from(path.trim());
+    if !candidate.is_absolute() {
+        return Err("Choose an absolute path to the download engine executable.".into());
+    }
+    if !system_engine_is_compatible(&candidate, &manifest) {
+        return Err(
+            "The selected executable is missing, invalid, or below the minimum supported version."
+                .into(),
+        );
+    }
+    std::fs::create_dir_all(data_root()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        data_root().join("engine-path.txt"),
+        candidate.to_string_lossy().as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn recheck_engine(app: tauri::AppHandle) -> Result<(), String> {
+    start_engine(app).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -166,7 +263,9 @@ fn main() {
             list_downloads,
             pause_download,
             resume_download,
-            remove_download
+            remove_download,
+            recheck_engine,
+            set_engine_path
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pencil Download Manager")

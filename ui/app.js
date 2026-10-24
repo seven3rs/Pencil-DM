@@ -16,11 +16,20 @@ function say(text, isError = false) {
   message.className = isError ? "error" : "";
 }
 
-function setBadge(state, detail) {
-  badge.className = "badge " + state;
+function setBadge(state, detail, command = "") {
+  badge.className = "badge " + (state === "missing" ? "error" : state);
   badge.textContent =
-    state === "ready" ? "Ready" : state === "error" ? "Engine problem" : "Starting…";
-  if (state === "error") say(detail || "The download engine could not start.", true);
+    state === "ready" ? "Ready" : state === "error" ? "Engine problem" :
+    state === "missing" ? "Setup needed" : "Starting…";
+  const needed = $("engine-needed");
+  needed.hidden = state !== "missing";
+  if (state === "missing") {
+    $("engine-needed-detail").textContent = detail || "Install the download engine, then check again.";
+    $("engine-command").textContent = command;
+    say("");
+  } else if (state === "error") {
+    say(detail || "The download engine could not start.", true);
+  }
   ready = state === "ready";
   $("add-btn").disabled = !ready;
 }
@@ -108,8 +117,46 @@ $("add-form").addEventListener("submit", async (ev) => {
 });
 
 listen("engine-status", (ev) => {
-  setBadge(ev.payload.state, ev.payload.detail);
+  setBadge(ev.payload.state, ev.payload.detail, ev.payload.command || "");
   refresh();
+});
+
+$("copy-engine-command").addEventListener("click", async () => {
+  const command = $("engine-command").textContent;
+  if (!command) return;
+  try {
+    await navigator.clipboard.writeText(command);
+    say("Command copied.");
+  } catch {
+    say("Copy failed. Select the command and copy it manually.", true);
+  }
+});
+
+$("save-engine-path").addEventListener("click", async () => {
+  const path = $("engine-path").value.trim();
+  if (!path) {
+    say("Enter an absolute executable path.", true);
+    return;
+  }
+  try {
+    await invoke("set_engine_path", { path });
+    say("Custom path saved. Checking the download engine…");
+    await invoke("recheck_engine");
+  } catch (e) {
+    say(String(e), true);
+  }
+});
+
+$("recheck-engine").addEventListener("click", async () => {
+  $("recheck-engine").disabled = true;
+  setBadge("starting");
+  try {
+    await invoke("recheck_engine");
+  } catch (e) {
+    say(String(e), true);
+  } finally {
+    $("recheck-engine").disabled = false;
+  }
 });
 listen("engine-progress", (ev) => {
   const { done, total } = ev.payload;
