@@ -16,7 +16,7 @@ pub struct EngineManifest {
     pub platforms: BTreeMap<String, PlatformEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct PlatformEntry {
     pub url: String,
     /// SHA-256 of the downloaded archive.
@@ -103,7 +103,7 @@ impl EngineManifest {
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let bad = |msg: String| Err(EngineError::Manifest(msg));
         if parse_version(&self.min_system_version).is_none() {
             return bad(format!(
@@ -112,6 +112,8 @@ impl EngineManifest {
             ));
         }
         if self.version.is_empty()
+            || self.version.starts_with('.')
+            || self.version.ends_with('.')
             || !self
                 .version
                 .chars()
@@ -315,6 +317,24 @@ mod tests {
             "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
             "bin":"a.exe","bin_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
         assert!(EngineManifest::parse(json).is_err());
+    }
+
+    #[test]
+    fn rejects_dot_only_or_dot_terminated_versions() {
+        let digest = "0".repeat(64);
+        for version in [".", "..", "...", ".1.2", "1.2."] {
+            let json = serde_json::json!({
+                "version": version,
+                "min_system_version": "1.36.0",
+                "platforms": {"test": {
+                    "url": "https://github.com/example/engine.zip",
+                    "sha256": digest,
+                    "bin": "engine.exe",
+                    "bin_sha256": digest
+                }}
+            }).to_string();
+            assert!(EngineManifest::parse(&json).is_err(), "accepted unsafe version {version:?}");
+        }
     }
 
     #[test]

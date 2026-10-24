@@ -70,7 +70,10 @@ where
         download_verified(
             &entry.url,
             &entry.sha256,
-            entry.max_bytes.unwrap_or(DEFAULT_MAX_DOWNLOAD),
+            entry
+                .max_bytes
+                .unwrap_or(DEFAULT_MAX_DOWNLOAD)
+                .min(DEFAULT_MAX_DOWNLOAD),
             &archive,
             &progress,
         )
@@ -192,6 +195,12 @@ pub fn install_from_archive(
     manifest: &EngineManifest,
     entry: &PlatformEntry,
 ) -> Result<PathBuf> {
+    manifest.validate()?;
+    if !manifest.platforms.values().any(|candidate| candidate == entry) {
+        return Err(EngineError::Manifest(
+            "platform entry does not belong to the validated manifest".into(),
+        ));
+    }
     let actual = sha256_file(archive_path)?;
     if !actual.eq_ignore_ascii_case(&entry.sha256) {
         return Err(EngineError::HashMismatch {
