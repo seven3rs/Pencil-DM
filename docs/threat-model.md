@@ -1,26 +1,43 @@
-# Threat model
+# Security threat model
 
-## Assets and boundaries
+## Scope and trust boundaries
 
-Assets include the embedded engine hashes, downloaded files, local download history, engine RPC secret, browser pairing credentials (if browser integration is added), and update signing keys. Trust boundaries are the public network, downloaded archives, the child-process RPC on loopback, the UI/webview, browser extensions, and release infrastructure.
+Pencil Download Manager is a Tauri 2 desktop application with a Svelte webview, a Rust command layer, a local `aria2c` child process, a local SQLite history/settings store, and a browser extension that can send downloads to the app. The principal boundaries are: release/build infrastructure to installed binaries; the public network to engine downloads and user downloads; the archive parser to the local filesystem; the webview to registered Tauri commands; the browser extension to loopback HTTP; and the app process to the engine child process.
 
-## Current controls and gaps
+Assets include the app and engine binaries, embedded engine SHA-256 values, updater public key, RPC and browser-pairing tokens, download URLs and metadata, cookies/custom headers passed to downloads, session files, database/settings, and user files. The app runs with the current user's privileges; it does not provide a sandbox for downloaded content.
 
-| Area | Existing control | Remaining risk / required follow-up |
+## Controls verified in the supplied source
+
+| Area | Verified control | Residual risk / gap |
 |---|---|---|
-| Engine installer | HTTPS URLs, archive and binary SHA-256 checks against compile-time manifest, size caps, zip path checks, symlink rejection | Hashes do not authenticate a compromised source manifest at development time; add collision, duplicate-entry, and fuzz/property tests. |
-| Redirects | Installer download redirects are restricted to HTTPS | Test downgrade, redirect loops, and host policy explicitly. |
-| Engine launch | Binary hash is checked during managed install/resolve; local child process | Re-hash immediately before spawn and make installed binary non-writable where practical to reduce TOCTOU. |
-| RPC | Loopback address, random per-process secret, no proxy for loopback calls | Review secret visibility in process arguments/logs and local process threat model. |
-| UI | Network-derived display strings use text nodes/textContent; no `innerHTML` in current UI | Current UI still uses global Tauri bridge; migrate to scoped `@tauri-apps/api` imports and a strict capability allow-list. |
-| Browser integration | Not implemented | Pairing, origin validation, rate limits, body limits, scheme validation, and fallback behavior are prerequisites before shipping. |
-| Updates/signing | Release workflow currently builds draft releases | Signed updater and platform signing/notarization are not implemented; keep signing keys out of source control. |
-| User URLs and file names | RPC validates network URL schemes; archive extraction blocks traversal and symlinks | Add comprehensive filename sanitization and persistent-path validation when history/categories are implemented. |
+| Distribution and installer | Tauri bundles the application; Windows NSIS is configured for current-user installation. Release workflow creates a draft and publishes only after the build matrix succeeds. | Workflow action references use version tags rather than immutable commit SHAs. Build provenance/reproducible builds are not established by this review. Installer signing depends on configured CI secrets. |
+| Engine source and manifest | `engine-manifest.json` is compiled into `pdm-engine`; manifest parsing validates version syntax, HTTPS URLs without embedded credentials, SHA-256 format, and relative binary/extraction paths. | The manifest hashes are only as trustworthy as the reviewed source/build and release process. A compromised source repository or build pipeline can replace both code and hashes. |
+| Engine download | HTTPS is required, redirects are capped, downgrade and credential-bearing redirects are rejected, and redirects are limited to the original host or known GitHub asset hosts. Download bytes have a size cap and are hashed before use. | TLS trusts the platform certificate roots. Hashes provide integrity against a mismatched artifact, not independent publisher identity if the embedded manifest itself is compromised. |
+| Archive extraction | Extraction verifies archive and executable SHA-256, rejects traversal/platform-specific paths and symlinks/special files, limits entry count/per-file/total uncompressed size, rejects duplicate/case-fold collisions, creates files without overwrite, and stages before promotion. | Archive parsing is not formally fuzzed. Same-user filesystem races and unusual Unicode equivalence on some filesystems remain possible; paths are rejected conservatively but no Unicode normalization crate is used. |
+| Engine execution | Managed engine binaries are hash-checked at install/resolve and re-hashed immediately before spawn. RPC listens on `127.0.0.1` on an ephemeral port and uses a random secret. The secret is read from a temporary private config file, not a command-line argument, and the file is removed after the RPC endpoint responds. | The hash-check-to-process-execution interval cannot be eliminated with a path-based spawn; a process running as the same user could race file replacement. System-installed engines are version-checked but are not authenticated against an embedded hash. |
+| RPC secret and session | RPC secret is generated per launch. The temporary config file uses mode `0600` on Unix and a current-user/SYSTEM ACL on Windows. Child stdout/stderr are discarded. | Same-user malware can generally inspect or control this user's processes and files. The session file may contain download URLs/metadata and should be treated as user data. |
+| Browser integration | Server binds loopback only. The extension must pair using a one-use, expiring pairing code and a recognized extension origin. API calls require a bearer token and paired origin, check the Host header, cap request body and batch size, rate-limit requests, and validate URL/header/filename fields. Token config is restricted to the current user on Windows and mode `0600` on Unix. | Loopback HTTP is not transport encryption; security relies on browser origin enforcement, unpredictable tokens/pairing, Host checks, and OS isolation. DNS rebinding and local same-user attackers remain in scope. Discovery exposes only an ephemeral port. |
+| Browser extension | Extension calls the fixed loopback address and preserves the browser's original download when forwarding fails. | Extension permissions are broad enough to observe browser downloads/cookies as configured in its manifest. Users should install it only from a trusted package and review its permissions. |
+| Webview and Tauri | `withGlobalTauri` is disabled. Capabilities are scoped to the main window and enumerate event listening, updater defaults, and process restart. CSP disallows remote script sources and has a separate development policy. UI uses explicit `@tauri-apps/api` imports. | Production CSP restricts styles to same-origin resources; the development CSP is intentionally broader for Vite. Tauri commands registered in Rust remain callable by the permitted webview; every command must continue validating inputs and destructive actions. The dev server CSP is intentionally broader for local Vite operation and must not be shipped as production CSP. |
+| User URLs and downloaded content | Download URL schemes are validated by the RPC client; browser integration rejects embedded URL credentials and non-HTTP(S) URLs. Filename checks reject traversal/separators, control/bidi formatting characters, Windows reserved device names, trailing dots/spaces, and long names. | Downloaded files are untrusted data. HTTP downloads remain supported by design. Redirects and content supplied by arbitrary user URLs are not authenticated by the engine manifest. |
+| Post-download actions | Commands for post-download execution and opening files exist in the app and require user-configured settings/paths. | Executing a downloaded file is inherently dangerous. The user must treat these actions as explicit trust decisions; the app does not sandbox the program. Re-check canonical path/allow-list handling whenever these flows change. |
+| Updates and signing | Tauri updater is configured with a public key and HTTPS GitHub release manifest URL. CI uploads updater metadata only when the signing secret is present and checks basic manifest structure before publishing. | The configured public key must correspond to a securely held private key. If the signing secret is absent, the workflow can build ordinary unsigned installers; platform signing/notarization also depends on secrets. Release publication policy and signatures must be checked for each actual release. |
+| Dependencies and CI | Rust workspace and npm lockfiles exist; CI runs Rust tests/lints, frontend type checks/tests/build, manifest check, and Linux app compile/tests. | Audits detect known advisories, not malicious dependencies or all vulnerabilities. Windows CI tests path behavior but cannot replace real Windows runtime testing. Linux GUI E2E requires the documented WebDriver environment. |
 
-## Review priorities
+## Threat scenarios
 
-1. Finish platform engine sourcing without accepting unverified binaries.
-2. Add fuzz/property tests for manifest parsing, archive extraction, and filename sanitization.
-3. Add authenticated browser integration only after threat-model review.
-4. Add dependency audit policy and a real end-to-end download test in CI.
-5. Record accepted risks in `docs/security-findings.md` before a public release.
+1. **Malicious or compromised engine archive:** archive paths, entry types, sizes, duplicates, and destination collisions are validated before writes; archive and executable hashes must match the embedded manifest. A compromised application source/build remains a root of trust.
+2. **Network downgrade or redirect abuse:** engine download URLs must use HTTPS; redirects are bounded and restricted to HTTPS on the original host or known GitHub asset hosts. Artifact hash verification remains mandatory.
+3. **Local RPC theft or forgery:** the engine binds loopback, secret is not passed in argv, and requests require the per-launch secret. Same-user attackers are not isolated by this design.
+4. **Browser-origin abuse / DNS rebinding:** the extension pairs through a one-use code; API requests validate Host, Origin, and token and are rate/body limited. The endpoint does not bind to external interfaces.
+5. **Path confusion:** archive paths and output filenames are checked across Windows and Unix naming rules; collisions are rejected rather than overwritten. Filesystem-specific Unicode equivalence and same-user races are residual concerns.
+6. **Untrusted downloaded content:** files may be malicious even when the download succeeds. The app does not inspect/sandbox file contents or automatically make them trustworthy.
+7. **Supply-chain compromise:** the embedded manifest, updater public key, release workflow, and CI credentials are critical trust roots. Review code and workflow changes, protect signing secrets, and verify published signatures/artifacts.
+
+## Explicitly unverified assumptions
+
+- The updater public key is correctly managed and its private key has not been exposed; this cannot be proven from source alone.
+- CI signing secrets and repository permissions are configured securely in the hosting service.
+- Users download installers from official release channels and protect their OS accounts.
+- Actual production installers are signed only when the required signing credentials are configured.
+- The Linux WebDriver smoke test passes only when its app binary, `aria2`, Tauri driver, and WebKitGTK driver are present; a missing driver is a failed/blocked check, not a pass.
