@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import { tauriApi } from "./lib/api";
   import { DownloadStore } from "./lib/store.svelte";
   import AddDialog from "./components/AddDialog.svelte";
@@ -9,13 +10,24 @@
   import Sidebar from "./components/Sidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
   import BrowserConnect from "./components/BrowserConnect.svelte";
+  import SchedulerPage from "./components/SchedulerPage.svelte";
 
   const store = new DownloadStore(tauriApi);
   let addOpen = $state(false);
   let menuOpen = $state(false);
+  let schedulerOpen = $state(false);
+  let powerCountdown = $state<{action: string; seconds: number} | null>(null);
+  let powerCleanup: Array<() => void> = [];
 
-  onMount(() => void store.start());
-  onDestroy(() => store.stop());
+  onMount(() => {
+    void store.start();
+    void Promise.all([
+      listen<{action: string; seconds: number}>("power-countdown", (event) => powerCountdown = event.payload),
+      listen("power-countdown-cancelled", () => powerCountdown = null),
+    ]).then(cleanups => powerCleanup.push(...cleanups));
+  });
+  onDestroy(() => { store.stop(); for (const cleanup of powerCleanup) cleanup(); });
+  async function cancelPower() { try { await tauriApi.cancelPowerAction(); powerCountdown = null; } catch (e) { store.say(String(e), true); } }
 
   /** True when the key press belongs to a form control or an open overlay. */
   function typingOrBusy(target: EventTarget | null): boolean {
@@ -48,10 +60,13 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="shell">
-  <TopBar {store} onadd={() => (addOpen = true)} />
+  <TopBar {store} onadd={() => (addOpen = true)} onscheduler={() => (schedulerOpen = !schedulerOpen)} />
   <Sidebar {store} />
 
   <div class="main">
+    {#if powerCountdown}
+      <div class="banner power-banner" role="alert"><span>{powerCountdown.action} in {powerCountdown.seconds} seconds.</span><button type="button" onclick={cancelPower}>Cancel</button></div>
+    {/if}
     {#if store.notice.text}
       <div class="banner" class:error={store.notice.isError} role={store.notice.isError ? "alert" : "status"}>
         <span>{store.notice.text}</span>
@@ -67,12 +82,18 @@
       <EnginePanel {store} />
     {/if}
 
-    <BrowserConnect />
-    <DownloadTable {store} onmenuchange={(open) => (menuOpen = open)} />
+    {#if schedulerOpen}
+      <SchedulerPage {store} onclose={() => (schedulerOpen = false)} />
+    {:else}
+      <BrowserConnect />
+      <DownloadTable {store} onmenuchange={(open) => (menuOpen = open)} />
+    {/if}
   </div>
 
   {#if store.selected}
-    <DetailsPanel download={store.selected} onclose={() => store.select(null)} />
+    {#key store.selected.gid}
+      <DetailsPanel download={store.selected} onclose={() => store.select(null)} />
+    {/key}
   {/if}
 </div>
 

@@ -196,3 +196,32 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.speed-toggle, .speed-value { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.speed-value input { width: 76px; }
+.scheduler-page { overflow: auto; padding: 18px; }
+.scheduler-page > header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.scheduler-page h2, .scheduler-page h3 { margin: 0 0 6px; }
+.scheduler-page p { color: var(--muted); margin: 0 0 10px; }
+.scheduler-layout { display: grid; grid-template-columns: minmax(250px, 360px) minmax(0, 1fr); gap: 18px; }
+.scheduler-form, .schedule-list { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 14px; min-width: 0; }
+.scheduler-form > label, .scheduler-form .time-grid label { display: grid; gap: 5px; margin: 10px 0; }
+.scheduler-form input:not([type=checkbox]) { width: 100%; min-width: 0; }
+.scheduler-form fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 8px; }
+.day-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.day-options label, .inline-check { display: flex; align-items: center; gap: 5px; }
+.time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.schedule-rule { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding: 12px 0; }
+.schedule-rule p { margin: 3px 0; }
+.schedule-rule small { color: var(--muted); }
+.schedule-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+button.danger { color: var(--danger); }
+@media (max-width: 900px) { .scheduler-layout { grid-template-columns: minmax(0, 1fr); } .schedule-rule { align-items: flex-start; flex-direction: column; } }
+.download-options { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.download-options h3 { font-size: 12px; margin: 12px 0 6px; }
+.download-options label { display: grid; gap: 5px; margin: 8px 0; color: var(--muted); font-size: 12px; }
+.download-options input, .download-options select { width: 100%; min-width: 0; }
+.checksum-badge { font-size: 12px; padding: 4px 7px; border-radius: 6px; background: var(--surface-2); }
+.checksum-badge.pass { color: var(--ok); }
+.checksum-badge.fail { color: var(--danger); }
+.power-banner { border-color: var(--danger); }

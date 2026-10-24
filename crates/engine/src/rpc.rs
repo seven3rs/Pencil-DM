@@ -124,6 +124,44 @@ impl RpcClient {
         Ok(gid.as_str().unwrap_or("").to_string())
     }
 
+    /// Apply an engine-wide option (for example, max-overall-download-limit).
+    pub async fn change_global_option(
+        &self,
+        options: serde_json::Map<String, Value>,
+    ) -> Result<()> {
+        self.call("changeGlobalOption", vec![Value::Object(options)])
+            .await
+            .map(|_| ())
+    }
+
+    /// Change options for one queued download (for example, max-download-limit).
+    pub async fn change_option(
+        &self,
+        gid: &str,
+        options: serde_json::Map<String, Value>,
+    ) -> Result<()> {
+        self.call("changeOption", vec![json!(gid), Value::Object(options)])
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn set_global_speed_limit(&self, bytes_per_second: Option<u64>) -> Result<()> {
+        self.change_global_option(speed_limit_options(
+            "max-overall-download-limit",
+            bytes_per_second,
+        ))
+        .await
+    }
+
+    pub async fn set_download_speed_limit(
+        &self,
+        gid: &str,
+        bytes_per_second: Option<u64>,
+    ) -> Result<()> {
+        self.change_option(gid, speed_limit_options("max-download-limit", bytes_per_second))
+            .await
+    }
+
     pub async fn pause(&self, gid: &str) -> Result<()> {
         self.call("pause", vec![json!(gid)]).await.map(|_| ())
     }
@@ -159,6 +197,15 @@ impl RpcClient {
     pub async fn shutdown(&self) {
         let _ = self.call("shutdown", vec![]).await;
     }
+}
+
+fn speed_limit_options(
+    key: &str,
+    bytes_per_second: Option<u64>,
+) -> serde_json::Map<String, Value> {
+    let mut options = serde_json::Map::new();
+    options.insert(key.into(), json!(bytes_per_second.unwrap_or(0).to_string()));
+    options
 }
 
 fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<String, Value>> {
@@ -251,6 +298,20 @@ fn parse_info(v: &Value) -> DownloadInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builds_global_and_per_download_limit_options() {
+        let global = speed_limit_options("max-overall-download-limit", Some(2048));
+        assert_eq!(global.get("max-overall-download-limit").unwrap(), "2048");
+        let per_download = speed_limit_options("max-download-limit", Some(512));
+        assert_eq!(per_download.get("max-download-limit").unwrap(), "512");
+        assert_eq!(
+            speed_limit_options("max-download-limit", None)
+                .get("max-download-limit")
+                .unwrap(),
+            "0"
+        );
+    }
 
     #[test]
     fn parses_status_payload() {

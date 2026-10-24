@@ -15,7 +15,22 @@ export interface Api {
   onEngineProgress(handler: (done: number, total: number | null) => void): Promise<() => void>;
 }
 
-export const tauriApi: Api = {
+export interface ScheduleRule { id: string; name: string; days: number[]; start_time: string; stop_time: string; timezone: string; speed_limit: number | null; enabled: boolean; }
+
+type ExtendedApi = Api & {
+  getSettings(): Promise<[string, string][]>;
+  setSpeedLimiter(enabled: boolean, bytesPerSecond: number): Promise<void>;
+  setDownloadSpeedLimit(gid: string, bytesPerSecond: number | null): Promise<void>;
+  getScheduleRules(): Promise<ScheduleRule[]>;
+  saveScheduleRules(rules: ScheduleRule[]): Promise<void>;
+  verifyChecksum(path: string, expected: string): Promise<boolean>;
+  setDownloadChecksum(gid: string, expected: string): Promise<void>;
+  setPostDownloadAction(gid: string, action: string): Promise<void>;
+  setPostDownloadProgram(gid: string, path: string, confirmed: boolean): Promise<void>;
+  cancelPowerAction(): Promise<void>;
+};
+
+export const tauriApi: ExtendedApi = {
   listDownloads: () => invoke<RawDownload[]>("list_downloads"),
   addDownload: (url) => invoke<string>("add_download", { url }),
   pauseDownload: (gid) => invoke("pause_download", { gid }),
@@ -23,6 +38,16 @@ export const tauriApi: Api = {
   removeDownload: (gid) => invoke("remove_download", { gid }),
   recheckEngine: () => invoke("recheck_engine"),
   setEnginePath: (path) => invoke("set_engine_path", { path }),
+  getSettings: () => invoke<[string, string][]>("get_settings"),
+  setSpeedLimiter: (enabled, bytesPerSecond) => invoke("set_speed_limiter", { enabled, bytesPerSecond }),
+  setDownloadSpeedLimit: (gid, bytesPerSecond) => invoke("set_download_speed_limit", { gid, bytesPerSecond }),
+  getScheduleRules: () => invoke<ScheduleRule[]>("get_schedule_rules"),
+  saveScheduleRules: (rules) => invoke("save_schedule_rules", { rules }),
+  verifyChecksum: (path, expected) => invoke<boolean>("verify_checksum", { path, expected }),
+  setDownloadChecksum: (gid, expected) => invoke("set_download_checksum", { gid, expected }),
+  setPostDownloadAction: (gid, action) => invoke("set_post_download_action", { gid, action }),
+  setPostDownloadProgram: (gid, path, confirmed) => invoke("set_post_download_program", { gid, path, confirmed }),
+  cancelPowerAction: () => invoke("cancel_power_action"),
   onEngineStatus: (handler) =>
     listen<{ state: EngineStatus["state"]; detail?: string; command?: string }>(
       "engine-status",
