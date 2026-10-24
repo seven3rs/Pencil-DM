@@ -114,7 +114,13 @@ impl EngineProcess {
         // Hash again at the last practical point before process creation. A
         // path-based spawn still cannot close the same-user race completely.
         if let Some(expected) = &opts.expected_sha256 {
-            let actual = crate::install::sha256_file(&opts.bin)?;
+            let actual = match crate::install::sha256_file(&opts.bin) {
+                Ok(actual) => actual,
+                Err(error) => {
+                    let _ = std::fs::remove_file(&rpc_config);
+                    return Err(error);
+                }
+            };
             if !actual.eq_ignore_ascii_case(expected) {
                 let _ = std::fs::remove_file(&rpc_config);
                 return Err(EngineError::HashMismatch {
