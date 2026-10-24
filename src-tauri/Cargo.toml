@@ -9,8 +9,13 @@ license = "MIT"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 chrono = "0.4"
 chrono-tz = "0.10"
 sha2 = "0.10"

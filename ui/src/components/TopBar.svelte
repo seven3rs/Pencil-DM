@@ -3,7 +3,7 @@
   import type { DownloadStore } from "../lib/store.svelte";
   import { tauriApi } from "../lib/api";
 
-  let { store, onadd, onscheduler }: { store: DownloadStore; onadd: () => void; onscheduler: () => void } = $props();
+  let { store, onadd, onscheduler, onabout }: { store: DownloadStore; onadd: () => void; onscheduler: () => void; onabout: () => void } = $props();
   let limiterEnabled = $state(false);
   let limitKib = $state(1024);
   let settingsLoaded = $state(false);
@@ -58,6 +58,7 @@
     <input type="number" min="1" max="1048576" bind:value={limitKib} disabled={!store.ready} />
   </label>
   <button type="button" onclick={onscheduler}>Scheduler</button>
+  <button type="button" onclick={onabout}>About</button>
   <button type="button" class="primary" onclick={onadd} disabled={!store.ready} title="Add URL (Ctrl/Cmd+N)">
     Add URL
   </button>

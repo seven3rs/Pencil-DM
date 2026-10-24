@@ -3,6 +3,7 @@
   import { formatBytes, formatEta, formatPercent, formatSpeed, statusLabel } from "../lib/format";
   import { isRunning } from "../lib/downloads";
   import type { DownloadStore } from "../lib/store.svelte";
+  import { tauriApi } from "../lib/api";
   import { scrollToReveal, visibleRange } from "../lib/virtual";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
 
@@ -37,6 +38,12 @@
         d.status === "paused"
           ? { label: "Resume", action: () => void store.resume(gid) }
           : { label: "Pause", action: () => void store.pause(gid), disabled: !isRunning(d.status) },
+        ...(d.status === "complete" || d.status === "completed" ? [
+          { label: "Open file", action: () => void tauriApi.openDownloadFile(gid).catch((error) => store.say(String(error), true)) },
+          { label: "Show in folder", action: () => void tauriApi.revealDownload(gid).catch((error) => store.say(String(error), true)) },
+          { label: "Copy link", action: () => void tauriApi.copyDownloadLink(gid).catch((error) => store.say(String(error), true)) },
+          { label: "Delete file from disk…", action: () => { if (confirm("Delete the completed file from disk? This cannot be undone.")) void tauriApi.deleteDownloadFile(gid, true).then(() => store.say("File deleted from disk.")).catch((error) => store.say(String(error), true)); }, danger: true },
+        ] : []),
         { label: "Copy file name", action: () => void navigator.clipboard?.writeText(d.name).catch(() => {}) },
         { label: "Remove", action: () => void store.remove(gid), danger: true },
       ],

@@ -1,0 +1,95 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { tauriApi } from "../lib/api";
+  import type { DownloadStore } from "../lib/store.svelte";
+
+  let { store, onclose }: { store: DownloadStore; onclose: () => void } = $props();
+  let minimizeToTray = $state(true);
+  let clipboardMonitor = $state(false);
+  let startWithOs = $state(false);
+  let loaded = $state(false);
+  let busy = $state(false);
+
+  onMount(() => {
+    void (async () => {
+      try {
+        const settings = Object.fromEntries(await tauriApi.getSettings());
+        minimizeToTray = settings.minimize_to_tray !== "false";
+        clipboardMonitor = settings.clipboard_monitor_enabled === "true";
+        startWithOs = await tauriApi.getAutostartEnabled().catch(() => false);
+      } catch (error) {
+        store.say(String(error), true);
+      } finally {
+        loaded = true;
+      }
+    })();
+  });
+
+  async function saveBoolean(key: string, value: boolean) {
+    try {
+      await tauriApi.setSetting(key, value ? "true" : "false");
+      window.dispatchEvent(new Event("desktop-settings-changed"));
+    } catch (error) {
+      store.say(String(error), true);
+      if (key === "minimize_to_tray") minimizeToTray = !value;
+      if (key === "clipboard_monitor_enabled") clipboardMonitor = !value;
+      return;
+    }
+  }
+
+  async function toggleAutostart(value: boolean) {
+    try {
+      await tauriApi.setAutostartEnabled(value);
+      startWithOs = value;
+    } catch (error) {
+      store.say(String(error), true);
+      startWithOs = !value;
+    }
+  }
+
+  async function copyDiagnostics() {
+    busy = true;
+    try {
+      const report = await tauriApi.diagnosticsReport();
+      await tauriApi.writeClipboard(report);
+      store.say("Diagnostics report copied. URLs, paths, and file names are redacted.");
+    } catch (error) {
+      store.say(String(error), true);
+    } finally {
+      busy = false;
+    }
+  }
+</script>
+
+<section class="desktop-page" aria-labelledby="about-title">
+  <header class="page-heading">
+    <div><h2 id="about-title">About</h2><p>Desktop integration and diagnostics</p></div>
+    <button type="button" onclick={onclose}>Back to downloads</button>
+  </header>
+
+  <section class="settings-card">
+    <h3>Desktop behavior</h3>
+    <label><input type="checkbox" bind:checked={minimizeToTray} disabled={!loaded} onchange={(event) => { minimizeToTray = event.currentTarget.checked; void saveBoolean("minimize_to_tray", event.currentTarget.checked); }} /> Minimize to system tray when closing the window (default on)</label>
+    <label><input type="checkbox" bind:checked={clipboardMonitor} disabled={!loaded} onchange={(event) => { clipboardMonitor = event.currentTarget.checked; void saveBoolean("clipboard_monitor_enabled", event.currentTarget.checked); }} /> Clipboard link prompt (default off)</label>
+    <label><input type="checkbox" checked={startWithOs} disabled={!loaded} onchange={(event) => void toggleAutostart(event.currentTarget.checked)} /> Start with the operating system (default off)</label>
+    <p class="hint">Clipboard contents are not read while the clipboard prompt is disabled.</p>
+  </section>
+
+  <section class="settings-card">
+    <h3>Pencil Download Manager</h3>
+    <p>Version 0.1.0</p>
+    <button type="button" onclick={() => void tauriApi.openThirdPartyNotices().catch((error) => store.say(String(error), true))}>Open THIRD_PARTY_NOTICES</button>
+    <button type="button" disabled={busy} onclick={() => void copyDiagnostics()}>{busy ? "Preparing report…" : "Copy diagnostics report"}</button>
+    <p class="hint">The report includes the app version, operating system, engine status, and up to 200 sanitized setup-log lines. URLs, paths, and file names are excluded.</p>
+  </section>
+</section>
+
+<style>
+  .desktop-page { padding: 24px; overflow: auto; height: 100%; box-sizing: border-box; }
+  .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  h2, h3, p { margin-top: 0; }
+  .page-heading p, .hint { color: var(--muted, #777); font-size: 0.9rem; }
+  .settings-card { display: grid; gap: 14px; padding: 18px; margin-bottom: 18px; border: 1px solid var(--border, #ddd); border-radius: 10px; }
+  .settings-card label { display: flex; align-items: center; gap: 10px; }
+  .settings-card button, .page-heading button { justify-self: start; }
+</style>

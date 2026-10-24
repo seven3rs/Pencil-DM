@@ -14,8 +14,14 @@ use sha2::Digest;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock};
 
@@ -31,6 +37,9 @@ struct AppState {
     db: Mutex<Option<Connection>>,
     browser: std::sync::Mutex<Option<browser::BrowserState>>,
     shutdown_cancel: Arc<AtomicBool>,
+    pending_urls: std::sync::Mutex<Vec<String>>,
+    last_clipboard_text: std::sync::Mutex<String>,
+    minimize_to_tray: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -393,7 +402,11 @@ async fn set_setting(
             .ok_or_else(|| "Settings database is not ready.".to_string())?,
         &key,
         &value,
-    )
+    )?;
+    if key == "minimize_to_tray" {
+        state.minimize_to_tray.store(value == "true", Ordering::SeqCst);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -739,21 +752,433 @@ async fn scheduler_loop(app: tauri::AppHandle) {
     }
 }
 
+fn looks_like_download_url(value: &str) -> bool {
+    let value = value.trim();
+    url::Url::parse(value)
+        .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "ftp"))
+}
+
+fn url_from_argument(value: &str) -> Option<String> {
+    let value = value.trim();
+    if looks_like_download_url(value) {
+        return Some(value.to_string());
+    }
+    let parsed = url::Url::parse(value).ok()?;
+    if parsed.scheme() != "pencil" {
+        return None;
+    }
+    parsed.query_pairs().find_map(|(key, value)| {
+        (key == "url" && looks_like_download_url(&value)).then(|| value.into_owned())
+    })
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show window", true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, "hide", "Hide window", true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause-all", "Pause all", true, None::<&str>)?;
+    let resume = MenuItem::with_id(app, "resume-all", "Resume all", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &hide, &pause, &resume, &quit])?;
+    let mut builder = TrayIconBuilder::with_id("main-tray").menu(&menu);
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => focus_main_window(app),
+            "hide" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            "pause-all" | "resume-all" => {
+                let app = app.clone();
+                let resume = event.id().as_ref() == "resume-all";
+                tauri::async_runtime::spawn(async move {
+                    let state = app.state::<AppState>();
+                    if let Ok(rpc) = state.rpc().await {
+                        if let Ok(items) = rpc.list().await {
+                            for item in items {
+                                if resume && item.status == "paused" {
+                                    let _ = rpc.resume(&item.gid).await;
+                                } else if !resume
+                                    && (item.status == "active" || item.status == "waiting")
+                                {
+                                    let _ = rpc.pause(&item.gid).await;
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, _event| {
+            focus_main_window(tray.app_handle());
+        })
+        .build(app)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_pending_urls(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut pending = state
+        .pending_urls
+        .lock()
+        .map_err(|_| "Pending URL lock failed".to_string())?;
+    Ok(std::mem::take(&mut *pending))
+}
+
+#[tauri::command]
+async fn pause_all(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let rpc = state.rpc().await?;
+    for item in rpc.list().await.map_err(|e| e.to_string())? {
+        if item.status == "active" || item.status == "waiting" {
+            rpc.pause(&item.gid).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn resume_all(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let rpc = state.rpc().await?;
+    for item in rpc.list().await.map_err(|e| e.to_string())? {
+        if item.status == "paused" {
+            rpc.resume(&item.gid).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    if text.len() > 1_000_000 {
+        return Err("Clipboard text is too large.".into());
+    }
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn copy_download_link(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    gid: String,
+) -> Result<(), String> {
+    let url = {
+        let db = state.db.lock().await;
+        let conn = db
+            .as_ref()
+            .ok_or_else(|| "History database is not ready.".to_string())?;
+        conn.query_row("SELECT url FROM downloads WHERE gid=?1", [&gid], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| e.to_string())?
+    };
+    if !looks_like_download_url(&url) {
+        return Err("No saved download link is available.".into());
+    }
+    app.clipboard().write_text(url).map_err(|e| e.to_string())
+}
+
+async fn completed_path(state: &AppState, gid: &str) -> Result<PathBuf, String> {
+    let rpc = state.rpc().await?;
+    let item = rpc
+        .list()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|item| item.gid == gid)
+        .ok_or_else(|| "Download not found.".to_string())?;
+    if item.status != "complete" && item.status != "completed" {
+        return Err("This action is only available for completed downloads.".into());
+    }
+    if item.path.trim().is_empty() {
+        return Err("The completed file path is unavailable.".into());
+    }
+    Ok(PathBuf::from(item.path))
+}
+
+#[tauri::command]
+async fn open_download_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    gid: String,
+) -> Result<(), String> {
+    let path = completed_path(state.inner(), &gid).await?;
+    app.opener()
+        .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn reveal_download(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    gid: String,
+) -> Result<(), String> {
+    let path = completed_path(state.inner(), &gid).await?;
+    app.opener()
+        .reveal_item_in_dir(path.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_download_file(
+    state: tauri::State<'_, AppState>,
+    gid: String,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("File deletion requires confirmation.".into());
+    }
+    let path = completed_path(state.inner(), &gid).await?;
+    let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Only a regular completed file can be deleted.".into());
+    }
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_dropped_links(paths: Vec<String>) -> Result<Vec<String>, String> {
+    if paths.len() > 100 {
+        return Err("Too many dropped files.".into());
+    }
+    let mut links = Vec::new();
+    for raw in paths {
+        let path = PathBuf::from(raw);
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        {
+            let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+            if !metadata.is_file() || metadata.len() > 1_000_000 {
+                continue;
+            }
+            let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            links.extend(
+                content
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| looks_like_download_url(line))
+                    .map(str::to_string),
+            );
+        }
+    }
+    links.truncate(1000);
+    Ok(links)
+}
+
+#[tauri::command]
+fn open_third_party_notices(app: tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .path()
+        .resolve("THIRD_PARTY_NOTICES.md", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn diagnostics_report(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let engine = if state.rpc.read().await.is_some() {
+        "ready"
+    } else {
+        "not ready"
+    };
+    let log_path = data_root().join("setup.log");
+    let lines = std::fs::read_to_string(log_path).unwrap_or_default();
+    let mut recent: Vec<&str> = lines.lines().rev().take(200).collect();
+    recent.reverse();
+    let sanitized = recent
+        .into_iter()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("install-engine") && lower.contains("failed") {
+                "install-engine: failed"
+            } else if lower.contains("install-engine") && lower.contains("ok") {
+                "install-engine: ok"
+            } else {
+                "setup event (details redacted)"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let version = env!("CARGO_PKG_VERSION");
+    let os = std::env::consts::OS;
+    Ok(format!(
+        "App version: {version}\nOS: {os}\nEngine status: {engine}\nRecent setup messages (up to 200 sanitized lines):\n{sanitized}"
+    ))
+}
+
+fn looks_like_link_in_clipboard(text: &str) -> Option<String> {
+    let candidate = text.trim();
+    if candidate.lines().count() == 1 && looks_like_download_url(candidate) {
+        Some(candidate.to_string())
+    } else {
+        None
+    }
+}
+
+async fn clipboard_monitor_loop(app: tauri::AppHandle) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let state = app.state::<AppState>();
+        let enabled = {
+            let db = state.db.lock().await;
+            db.as_ref()
+                .and_then(|conn| store::settings(conn).ok())
+                .map(|items| {
+                    items.iter().any(|(key, value)| {
+                        key == "clipboard_monitor_enabled" && value == "true"
+                    })
+                })
+                .unwrap_or(false)
+        };
+        if !enabled {
+            continue;
+        }
+        let text = match app.clipboard().read_text() {
+            Ok(text) => text,
+            Err(_) => continue,
+        };
+        let mut last = match state.last_clipboard_text.lock() {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if *last == text {
+            continue;
+        }
+        *last = text.clone();
+        drop(last);
+        if let Some(candidate) = looks_like_link_in_clipboard(&text) {
+            let _ = app.emit("clipboard-link-detected", candidate);
+        }
+    }
+}
+
 fn main() {
     if std::env::args().any(|a| a == "--install-engine") {
         std::process::exit(install_engine_cli());
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            focus_main_window(app);
+            for argument in argv {
+                if argument.starts_with("pencil://") {
+                    continue;
+                }
+                if let Some(url) = url_from_argument(&argument) {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        if let Ok(mut pending) = state.pending_urls.lock() {
+                            pending.push(url.clone());
+                        }
+                    }
+                    let _ = app.emit("open-add-url", url);
+                }
+            }
+        }))
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let db = store::open(&data_root().join("pencil.db")).ok();
+            let minimize_to_tray = db
+                .as_ref()
+                .and_then(|conn| store::settings(conn).ok())
+                .and_then(|settings| {
+                    settings
+                        .into_iter()
+                        .find(|(key, _)| key == "minimize_to_tray")
+                        .map(|(_, value)| value == "true")
+                })
+                .unwrap_or(true);
+            let mut initial_urls = std::env::args()
+                .skip(1)
+                .filter(|arg| !arg.starts_with("pencil://"))
+                .filter_map(|arg| url_from_argument(&arg))
+                .collect::<Vec<_>>();
+            if let Some(urls) = app.deep_link().get_current()? {
+                initial_urls.extend(
+                    urls.into_iter()
+                        .filter_map(|url| url_from_argument(url.as_str())),
+                );
+            }
+            initial_urls.sort();
+            initial_urls.dedup();
             app.manage(AppState {
                 db: Mutex::new(db),
                 browser: std::sync::Mutex::new(None),
                 shutdown_cancel: Arc::new(AtomicBool::new(false)),
+                pending_urls: std::sync::Mutex::new(initial_urls),
+                last_clipboard_text: std::sync::Mutex::new(String::new()),
+                minimize_to_tray: Arc::new(AtomicBool::new(minimize_to_tray)),
                 ..AppState::default()
             });
+            #[cfg(any(target_os = "linux", all(debug_assertions, target_os = "windows")))]
+            let _ = app.deep_link().register_all();
+            let deep_link_app = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for incoming in event.urls() {
+                    if let Some(url) = url_from_argument(incoming.as_str()) {
+                        if let Some(state) = deep_link_app.try_state::<AppState>() {
+                            if let Ok(mut pending) = state.pending_urls.lock() {
+                                pending.push(url.clone());
+                            }
+                        }
+                        let _ = deep_link_app.emit("open-add-url", url);
+                    }
+                }
+            });
+            build_tray(app)?;
+            if let Some(window) = app.get_webview_window("main") {
+                let close_window = window.clone();
+                let close_app = app.handle().clone();
+                let minimize_setting = app.state::<AppState>().minimize_to_tray.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if minimize_setting.load(Ordering::SeqCst) {
+                            api.prevent_close();
+                            let _ = close_window.hide();
+                        } else {
+                            close_app.exit(0);
+                        }
+                    }
+                });
+            }
+            let clipboard_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move { clipboard_monitor_loop(clipboard_app).await });
             let browser = browser::start(app.handle().clone(), &data_root())
                 .map_err(std::io::Error::other)?;
             *app.state::<AppState>()
@@ -792,7 +1217,20 @@ fn main() {
             cancel_power_action,
             allow_program,
             run_allowed_program,
-            set_post_download_program
+            set_post_download_program,
+            get_pending_urls,
+            pause_all,
+            resume_all,
+            set_autostart_enabled,
+            get_autostart_enabled,
+            write_clipboard,
+            copy_download_link,
+            open_download_file,
+            reveal_download,
+            delete_download_file,
+            read_dropped_links,
+            open_third_party_notices,
+            diagnostics_report,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pencil Download Manager")
@@ -806,4 +1244,26 @@ fn main() {
                 });
             }
         });
+}
+
+#[cfg(test)]
+mod desktop_integration_tests {
+    use super::{looks_like_download_url, url_from_argument};
+
+    #[test]
+    fn only_download_protocols_are_treated_as_links() {
+        assert!(looks_like_download_url("https://example.test/file.zip"));
+        assert!(looks_like_download_url("ftp://example.test/file.zip"));
+        assert!(!looks_like_download_url("javascript:alert(1)"));
+        assert!(!looks_like_download_url("not a url"));
+    }
+
+    #[test]
+    fn pencil_deep_link_extracts_encoded_download_url() {
+        assert_eq!(
+            url_from_argument("pencil://add?url=https%3A%2F%2Fexample.test%2Ffile.zip"),
+            Some("https://example.test/file.zip".to_string())
+        );
+        assert_eq!(url_from_argument("pencil://add"), None);
+    }
 }

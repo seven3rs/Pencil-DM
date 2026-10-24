@@ -2,7 +2,7 @@
   import { parseLinks } from "../lib/links";
   import type { DownloadStore } from "../lib/store.svelte";
 
-  let { store, open, onclose }: { store: DownloadStore; open: boolean; onclose: () => void } = $props();
+  let { store, open, onclose, initialText = "" }: { store: DownloadStore; open: boolean; onclose: () => void; initialText?: string } = $props();
 
   let dialog: HTMLDialogElement;
   let text = $state("");
@@ -16,6 +16,7 @@
   $effect(() => {
     if (open && !dialog.open) {
       rejected = {};
+      text = initialText;
       dialog.showModal();
     } else if (!open && dialog.open) {
       dialog.close();
