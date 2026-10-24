@@ -1,7 +1,7 @@
 name: release
 
-# Push a tag like v0.1.0 to build installers for every platform and attach them
-# to a draft GitHub release.
+# Every platform uploads to the same draft release. The publish job runs only
+# after every matrix build succeeds, so users never see a partially built release.
 on:
   push:
     tags: ["v*"]
@@ -17,8 +17,26 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/verify-manifest.sh
 
-  build:
+  prepare-release:
     needs: verify-manifest
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Create or find the draft release
+        id: release
+        run: |
+          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "Pencil Download Manager $TAG_NAME" --notes "See the assets below to download and install."
+          fi
+          release_id=$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [verify-manifest, prepare-release]
     strategy:
       fail-fast: false
       matrix:
@@ -65,17 +83,108 @@ jobs:
 
       - run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Configure updater artifacts when a signing key is available
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            node -e 'const fs=require("fs"); const p="src-tauri/tauri.conf.json"; const c=JSON.parse(fs.readFileSync(p,"utf8")); c.bundle.createUpdaterArtifacts=false; fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");'
+            echo "Updater signing secret is absent; building ordinary unsigned installers."
+          else
+            node -e 'const c=require("./src-tauri/tauri.conf.json"); if (!c.plugins?.updater?.pubkey || c.plugins.updater.pubkey.startsWith("REPLACE_WITH_")) throw new Error("Generate an updater key pair and set plugins.updater.pubkey before enabling updater signing.");'
+          fi
+
+      - name: Prepare changelog notes for the update dialog
+        id: release_notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v version="$version" '
+            $0 ~ "^## " version "([[:space:]]|$)" { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "No CHANGELOG.md section found for $version; using the release summary."
+            printf 'Pencil Download Manager %s. See the release page for details.\n' "$version" > "$RUNNER_TEMP/release-notes.md"
+          fi
+          {
+            echo 'body<<PDM_RELEASE_NOTES'
+            cat "$RUNNER_TEMP/release-notes.md"
+            echo 'PDM_RELEASE_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Azure Trusted Signing CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE -and $env:AZURE_CLIENT_ID -and $env:AZURE_CLIENT_SECRET -and $env:AZURE_TENANT_ID -and $env:AZURE_TRUSTED_SIGNING_ENDPOINT -and $env:AZURE_TRUSTED_SIGNING_ACCOUNT -and $env:AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE) {
+            cargo install artifact-signing-cli --locked
+          } else {
+            Write-Host 'No complete Azure Trusted Signing configuration; using the PFX option if configured, otherwise unsigned.'
+          }
+
+      - name: Build and upload to draft release
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code signing (add these as repository secrets when you have certificates):
-          # Windows: TAURI_SIGNING_* / certificate settings in tauri.conf.json
-          # macOS:   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
-          #          APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # PFX (OV/EV) signing. The custom sign command is a no-op when absent.
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # Azure Trusted Signing. Used only when the PFX option is not configured.
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          # Tauri skips Apple signing/notarization when these are not configured.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
           releaseName: "Pencil Download Manager ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install."
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+  publish:
+    name: Publish release after all platform builds
+    needs: [verify-manifest, prepare-release, build]
+    runs-on: ubuntu-latest
+    if: ${{ success() }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG_NAME: ${{ github.ref_name }}
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    steps:
+      - name: Verify updater manifest was uploaded
+        if: env.HAS_UPDATER_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-check"
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/release-check"
+          node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(!j.version||!j.platforms||Object.keys(j.platforms).length<4){throw new Error("latest.json is missing its version or expected platform entries")};console.log(`Validated latest.json for ${j.version} (${Object.keys(j.platforms).join(", ")})`)' "$RUNNER_TEMP/release-check/latest.json"
+
+      - name: Publish draft release
+        run: gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

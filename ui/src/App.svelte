@@ -2,6 +2,8 @@
   import { onDestroy, onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { check, type Update } from "@tauri-apps/plugin-updater";
+  import { relaunch } from "@tauri-apps/plugin-process";
   import { tauriApi } from "./lib/api";
   import { DownloadStore } from "./lib/store.svelte";
   import AddDialog from "./components/AddDialog.svelte";
@@ -13,6 +15,8 @@
   import BrowserConnect from "./components/BrowserConnect.svelte";
   import SchedulerPage from "./components/SchedulerPage.svelte";
   import DesktopPage from "./components/DesktopPage.svelte";
+  import UpdateDialog from "./components/UpdateDialog.svelte";
+  import { isRunning } from "./lib/downloads";
 
   const store = new DownloadStore(tauriApi);
   let addOpen = $state(false);
@@ -22,8 +26,52 @@
   let pendingAddText = $state("");
   let clipboardPrompt = $state("");
   let clipboardEnabled = $state(false);
+  let availableUpdate = $state.raw<Update | null>(null);
+  let updateCheckBusy = $state(false);
+  let updateInstallBusy = $state(false);
+  let updateError = $state("");
   let powerCountdown = $state<{action: string; seconds: number} | null>(null);
   let powerCleanup: Array<() => void> = [];
+
+  async function checkForUpdates(quiet = false) {
+    if (updateCheckBusy) return;
+    updateCheckBusy = true;
+    try {
+      const update = await check();
+      if (update) {
+        availableUpdate = update;
+        updateError = "";
+      } else if (!quiet) {
+        store.say("You are using the latest version.");
+      }
+    } catch (error) {
+      if (!quiet) store.say(`Update check failed: ${String(error)}`, true);
+    } finally {
+      updateCheckBusy = false;
+    }
+  }
+
+  async function installUpdate() {
+    if (!availableUpdate || updateInstallBusy) return;
+    await store.refresh();
+    const activeDownloads = store.items.filter((item) => isRunning(item.status));
+    const engineStatusUnknown = store.engine.state !== "ready";
+    if ((activeDownloads.length || engineStatusUnknown) && !window.confirm(
+      engineStatusUnknown
+        ? "The download engine status is not ready to verify. Installing the update will restart the app and may interrupt downloads. Continue?"
+        : `${activeDownloads.length} download(s) are active or queued. Installing the update will restart the app and may interrupt them. Continue?`,
+    )) return;
+
+    updateInstallBusy = true;
+    updateError = "";
+    try {
+      await availableUpdate.downloadAndInstall();
+      await relaunch();
+    } catch (error) {
+      updateError = `Update installation failed: ${String(error)}`;
+      updateInstallBusy = false;
+    }
+  }
 
   function openAddWithText(text: string) {
     pendingAddText = text;
@@ -95,6 +143,7 @@
         const settings = Object.fromEntries(await tauriApi.getSettings());
         clipboardEnabled = settings.clipboard_monitor_enabled === "true";
         await drainPendingUrls();
+        if (settings.check_updates_on_startup !== "false") void checkForUpdates(true);
       } catch (error) {
         store.say(String(error), true);
       }
@@ -181,7 +230,7 @@
     {#if schedulerOpen}
       <SchedulerPage {store} onclose={() => (schedulerOpen = false)} />
     {:else if desktopOpen}
-      <DesktopPage {store} onclose={() => (desktopOpen = false)} />
+      <DesktopPage {store} onclose={() => (desktopOpen = false)} oncheckupdate={() => void checkForUpdates(false)} />
     {:else}
       <BrowserConnect />
       <DownloadTable {store} onmenuchange={(open) => (menuOpen = open)} />
@@ -194,5 +243,9 @@
     {/key}
   {/if}
 </div>
+
+{#if availableUpdate}
+  <UpdateDialog update={availableUpdate} busy={updateInstallBusy} error={updateError} oninstall={() => void installUpdate()} onclose={() => { if (!updateInstallBusy) availableUpdate = null; }} />
+{/if}
 
 <AddDialog {store} open={addOpen} initialText={pendingAddText} onclose={() => { addOpen = false; pendingAddText = ""; }} />

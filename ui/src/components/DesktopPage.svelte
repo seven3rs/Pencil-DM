@@ -1,22 +1,27 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { getVersion } from "@tauri-apps/api/app";
   import { tauriApi } from "../lib/api";
   import type { DownloadStore } from "../lib/store.svelte";
 
-  let { store, onclose }: { store: DownloadStore; onclose: () => void } = $props();
+  let { store, onclose, oncheckupdate }: { store: DownloadStore; onclose: () => void; oncheckupdate: () => void } = $props();
   let minimizeToTray = $state(true);
   let clipboardMonitor = $state(false);
   let startWithOs = $state(false);
+  let checkUpdatesOnStartup = $state(true);
+  let appVersion = $state("...");
   let loaded = $state(false);
   let busy = $state(false);
 
   onMount(() => {
+    void getVersion().then((version) => appVersion = version).catch(() => {});
     void (async () => {
       try {
         const settings = Object.fromEntries(await tauriApi.getSettings());
         minimizeToTray = settings.minimize_to_tray !== "false";
         clipboardMonitor = settings.clipboard_monitor_enabled === "true";
         startWithOs = await tauriApi.getAutostartEnabled().catch(() => false);
+        checkUpdatesOnStartup = settings.check_updates_on_startup !== "false";
       } catch (error) {
         store.say(String(error), true);
       } finally {
@@ -33,6 +38,7 @@
       store.say(String(error), true);
       if (key === "minimize_to_tray") minimizeToTray = !value;
       if (key === "clipboard_monitor_enabled") clipboardMonitor = !value;
+      if (key === "check_updates_on_startup") checkUpdatesOnStartup = !value;
       return;
     }
   }
@@ -71,13 +77,15 @@
     <h3>Desktop behavior</h3>
     <label><input type="checkbox" bind:checked={minimizeToTray} disabled={!loaded} onchange={(event) => { minimizeToTray = event.currentTarget.checked; void saveBoolean("minimize_to_tray", event.currentTarget.checked); }} /> Minimize to system tray when closing the window (default on)</label>
     <label><input type="checkbox" bind:checked={clipboardMonitor} disabled={!loaded} onchange={(event) => { clipboardMonitor = event.currentTarget.checked; void saveBoolean("clipboard_monitor_enabled", event.currentTarget.checked); }} /> Clipboard link prompt (default off)</label>
+    <label><input type="checkbox" bind:checked={checkUpdatesOnStartup} disabled={!loaded} onchange={(event) => { checkUpdatesOnStartup = event.currentTarget.checked; void saveBoolean("check_updates_on_startup", event.currentTarget.checked); }} /> Check for updates quietly on startup (default on)</label>
     <label><input type="checkbox" checked={startWithOs} disabled={!loaded} onchange={(event) => void toggleAutostart(event.currentTarget.checked)} /> Start with the operating system (default off)</label>
     <p class="hint">Clipboard contents are not read while the clipboard prompt is disabled.</p>
   </section>
 
   <section class="settings-card">
     <h3>Pencil Download Manager</h3>
-    <p>Version 0.1.0</p>
+    <p>Version {appVersion}</p>
+    <button type="button" disabled={busy} onclick={oncheckupdate}>Check for updates</button>
     <button type="button" onclick={() => void tauriApi.openThirdPartyNotices().catch((error) => store.say(String(error), true))}>Open THIRD_PARTY_NOTICES</button>
     <button type="button" disabled={busy} onclick={() => void copyDiagnostics()}>{busy ? "Preparing report…" : "Copy diagnostics report"}</button>
     <p class="hint">The report includes the app version, operating system, engine status, and up to 200 sanitized setup-log lines. URLs, paths, and file names are excluded.</p>

@@ -30,6 +30,13 @@
   "plugins": {
     "deep-link": {
       "desktop": { "schemes": ["pencil"] }
+    },
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/seven3rs/Pencil-Download-Manager/releases/latest/download/latest.json"
+      ],
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {
@@ -50,7 +57,8 @@
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "./windows/hooks.nsh"
-      }
+      },
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ./windows/sign-windows.ps1 %1"
     },
     "linux": {
       "deb": {
@@ -63,6 +71,10 @@
           "aria2"
         ]
       }
+    },
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "entitlements": "./Entitlements.plist"
     }
   }
 }
