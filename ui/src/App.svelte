@@ -8,6 +8,7 @@
   import EnginePanel from "./components/EnginePanel.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
+  import BrowserConnect from "./components/BrowserConnect.svelte";
 
   const store = new DownloadStore(tauriApi);
   let addOpen = $state(false);
@@ -66,6 +67,7 @@
       <EnginePanel {store} />
     {/if}
 
+    <BrowserConnect />
     <DownloadTable {store} onmenuchange={(open) => (menuOpen = open)} />
   </div>
 

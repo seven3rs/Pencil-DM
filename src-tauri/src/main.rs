@@ -6,6 +6,7 @@ use pdm_engine::{
 };
 use serde_json::json;
 mod store;
+mod browser;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
@@ -21,6 +22,7 @@ struct AppState {
     /// Owns the child process so it can be shut down on exit.
     process: Mutex<Option<EngineProcess>>,
     db: Mutex<Option<Connection>>,
+    browser: Mutex<Option<browser::BrowserState>>,
 }
 
 impl AppState {
@@ -378,6 +380,20 @@ async fn update_category(
     Ok(())
 }
 
+#[tauri::command]
+fn create_browser_pairing_code(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let browser = state
+        .browser
+        .lock()
+        .map_err(|_| "Browser integration lock failed".to_string())?;
+    browser
+        .as_ref()
+        .ok_or_else(|| {
+            "Browser integration is unavailable. Restart the app and try again.".to_string()
+        })?
+        .create_pairing_code()
+}
+
 fn main() {
     if std::env::args().any(|a| a == "--install-engine") {
         std::process::exit(install_engine_cli());
@@ -388,8 +404,16 @@ fn main() {
             let db = store::open(&data_root().join("pencil.db")).ok();
             app.manage(AppState {
                 db: Mutex::new(db),
+                browser: Mutex::new(None),
                 ..AppState::default()
             });
+            let browser = browser::start(app.handle().clone(), &data_root())
+                .map_err(std::io::Error::other)?;
+            *app.state::<AppState>()
+                .browser
+                .lock()
+                .map_err(|_| std::io::Error::other("Browser integration lock failed"))? =
+                Some(browser);
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { start_engine(handle).await });
             Ok(())
@@ -406,7 +430,8 @@ fn main() {
             set_setting,
             get_settings,
             list_categories,
-            update_category
+            update_category,
+            create_browser_pairing_code
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pencil Download Manager")

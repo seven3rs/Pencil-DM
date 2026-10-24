@@ -14,6 +14,16 @@ const STATUS_KEYS: [&str; 7] = [
     "files",
 ];
 
+/// Request-specific HTTP metadata forwarded to aria2 for a single download.
+#[derive(Debug, Clone, Default)]
+pub struct DownloadOptions {
+    pub referer: Option<String>,
+    pub cookies: Option<String>,
+    pub user_agent: Option<String>,
+    pub file_name: Option<String>,
+    pub headers: Vec<(String, String)>,
+}
+
 /// One download as shown in the UI.
 #[derive(Debug, Clone, Serialize)]
 pub struct DownloadInfo {
@@ -87,6 +97,15 @@ impl RpcClient {
 
     /// Queue a download. Only plain network URLs are accepted.
     pub async fn add_uri(&self, uri: &str) -> Result<String> {
+        self.add_uri_with_options(uri, &DownloadOptions::default()).await
+    }
+
+    /// Queue a download with request metadata that applies only to this URI.
+    pub async fn add_uri_with_options(
+        &self,
+        uri: &str,
+        options: &DownloadOptions,
+    ) -> Result<String> {
         let parsed = reqwest::Url::parse(uri.trim())
             .map_err(|_| EngineError::Rpc("that does not look like a valid link".into()))?;
         if !matches!(parsed.scheme(), "http" | "https" | "ftp" | "sftp") {
@@ -95,7 +114,12 @@ impl RpcClient {
                 parsed.scheme()
             )));
         }
-        let gid = self.call("addUri", vec![json!([parsed.as_str()])]).await?;
+        let aria_options = build_aria_options(options)?;
+        let mut params = vec![json!([parsed.as_str()])];
+        if !aria_options.is_empty() {
+            params.push(Value::Object(aria_options));
+        }
+        let gid = self.call("addUri", params).await?;
         Ok(gid.as_str().unwrap_or("").to_string())
     }
 
@@ -134,6 +158,54 @@ impl RpcClient {
     pub async fn shutdown(&self) {
         let _ = self.call("shutdown", vec![]).await;
     }
+}
+
+fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<String, Value>> {
+    let mut aria_options = serde_json::Map::new();
+    if let Some(value) = options.referer.as_deref().filter(|s| !s.is_empty()) {
+        if value.contains('\r') || value.contains('\n') {
+            return Err(EngineError::Rpc("invalid referer".into()));
+        }
+        aria_options.insert("referer".into(), json!(value));
+    }
+    if let Some(value) = options.user_agent.as_deref().filter(|s| !s.is_empty()) {
+        if value.contains('\r') || value.contains('\n') {
+            return Err(EngineError::Rpc("invalid user-agent".into()));
+        }
+        aria_options.insert("user-agent".into(), json!(value));
+    }
+    if let Some(value) = options.file_name.as_deref().filter(|s| !s.is_empty()) {
+        if value.len() > 255
+            || value == "."
+            || value == ".."
+            || value.contains('/')
+            || value.contains('\\')
+            || value.chars().any(char::is_control)
+        {
+            return Err(EngineError::Rpc("invalid output file name".into()));
+        }
+        aria_options.insert("out".into(), json!(value));
+    }
+    let mut headers = options.headers.clone();
+    if let Some(cookie) = options.cookies.as_deref().filter(|s| !s.is_empty()) {
+        headers.push(("Cookie".into(), cookie.into()));
+    }
+    let mut rendered_headers = Vec::with_capacity(headers.len());
+    for (name, value) in headers {
+        if name.is_empty()
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            || value.contains('\r')
+            || value.contains('\n')
+            || value.contains('\0')
+        {
+            return Err(EngineError::Rpc("invalid download header".into()));
+        }
+        rendered_headers.push(json!(format!("{name}: {value}")));
+    }
+    if !rendered_headers.is_empty() {
+        aria_options.insert("header".into(), Value::Array(rendered_headers));
+    }
+    Ok(aria_options)
 }
 
 fn parse_info(v: &Value) -> DownloadInfo {
@@ -197,6 +269,29 @@ mod tests {
         let info = parse_info(&v);
         assert_eq!(info.name, "https://a/b.zip");
         assert_eq!(info.path, "");
+    }
+
+    #[test]
+    fn builds_per_download_options_and_rejects_header_injection() {
+        let options = DownloadOptions {
+            referer: Some("https://example.test/page".into()),
+            cookies: Some("session=abc".into()),
+            user_agent: Some("PDM test".into()),
+            file_name: Some("example.zip".into()),
+            headers: vec![("X-Test".into(), "ok".into())],
+        };
+        let built = build_aria_options(&options).unwrap();
+        assert_eq!(built["referer"], "https://example.test/page");
+        assert_eq!(built["user-agent"], "PDM test");
+        assert_eq!(built["out"], "example.zip");
+        let headers = built["header"].as_array().unwrap();
+        assert!(headers.contains(&json!("X-Test: ok")));
+        assert!(headers.contains(&json!("Cookie: session=abc")));
+        let bad = DownloadOptions {
+            headers: vec![("X-Test".into(), "ok\r\nX-Evil: yes".into())],
+            ..DownloadOptions::default()
+        };
+        assert!(build_aria_options(&bad).is_err());
     }
 
     #[tokio::test]

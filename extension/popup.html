@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pencil Download Manager</title><link rel="stylesheet" href="popup.css"></head>
+<body><main><h1>Pencil Download Manager</h1><p id="status" role="status">Checking connection…</p>
+<label class="toggle"><input id="enabled" type="checkbox"> Intercept browser downloads</label>
+<section id="pairing"><label for="code">One-time pairing code</label><div class="pair-row"><input id="code" autocomplete="off" maxlength="32" placeholder="Enter code from Pencil"><button id="pair">Pair</button></div></section>
+<label for="small">Ignore files smaller than</label><select id="small"><option value="0">No size filter</option><option value="262144">256 KB</option><option value="1048576">1 MB</option><option value="5242880">5 MB</option><option value="10485760">10 MB</option></select>
+<label for="domains">Ignored domains (comma or newline separated)</label><textarea id="domains" rows="3" placeholder="example.com"></textarea><button id="save">Save settings</button><p class="privacy">Downloads and cookies are sent only to the local Pencil app.</p><p id="message" role="status"></p></main><script src="popup.js"></script></body></html>

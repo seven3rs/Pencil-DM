@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Pencil Download Manager",
+  "version": "0.1.0",
+  "description": "Send browser downloads to Pencil Download Manager running locally.",
+  "permissions": ["downloads", "cookies", "contextMenus", "storage", "notifications"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Pencil Download Manager", "default_popup": "popup.html" },
+  "icons": { "48": "icon.png", "128": "icon.png" }
+}
