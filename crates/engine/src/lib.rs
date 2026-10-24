@@ -94,13 +94,9 @@ pub fn system_engine_is_compatible(path: &Path, manifest: &EngineManifest) -> bo
 
 fn find_system_engine(manifest: &EngineManifest) -> Option<PathBuf> {
     parse_version(&manifest.min_system_version)?;
-    let candidates = system_engine_candidates();
-    for candidate in candidates {
-        if system_engine_is_compatible(&candidate, manifest) {
-            return Some(candidate);
-        }
-    }
-    None
+    system_engine_candidates()
+        .into_iter()
+        .find(|candidate| system_engine_is_compatible(candidate, manifest))
 }
 
 fn system_engine_candidates() -> Vec<PathBuf> {

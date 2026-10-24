@@ -301,6 +301,7 @@ mod tests {
         };
         let manifest = EngineManifest {
             version: "9.9.9".into(),
+            min_system_version: "1.36.0".into(),
             platforms: [("test".to_string(), entry.clone())].into_iter().collect(),
         };
         (zip_path, manifest, entry)

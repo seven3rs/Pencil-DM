@@ -159,9 +159,9 @@ pub fn parse_release_tag(tag: &str) -> Option<String> {
         .unwrap_or(tag);
     let parsed = parse_version(version)?;
     if parsed.len() < 2
-        || version.split('.').any(|part| {
-            part.is_empty() || !part.chars().all(|c| c.is_ascii_digit())
-        })
+        || version
+            .split('.')
+            .any(|part| part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()))
     {
         return None;
     }

@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use pdm_engine::{
-    resolve_engine, DownloadInfo, EngineManifest, EngineProcess, EngineSource, LaunchOptions,
-    system_engine_is_compatible, RpcClient,
+    resolve_engine, system_engine_is_compatible, DownloadInfo, EngineManifest, EngineProcess,
+    EngineSource, LaunchOptions, RpcClient,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -115,9 +115,7 @@ fn missing_engine_instructions() -> (String, String) {
         let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
         let fedora_like = os_release.lines().any(|line| {
             (line.starts_with("ID=")
-                && (line.contains("fedora")
-                    || line.contains("rhel")
-                    || line.contains("centos")))
+                && (line.contains("fedora") || line.contains("rhel") || line.contains("centos")))
                 || (line.starts_with("ID_LIKE=")
                     && (line.contains("fedora") || line.contains("rhel")))
         });
@@ -133,7 +131,10 @@ fn missing_engine_instructions() -> (String, String) {
         );
     }
     #[allow(unreachable_code)]
-    ("The download engine is unavailable on this platform".into(), String::new())
+    (
+        "The download engine is unavailable on this platform".into(),
+        String::new(),
+    )
 }
 
 async fn start_engine(app: tauri::AppHandle) {
@@ -157,11 +158,14 @@ async fn start_engine(app: tauri::AppHandle) {
         Ok(EngineSource::Managed(p)) | Ok(EngineSource::System(p)) => p,
         Err(pdm_engine::EngineError::NotFound) => {
             let (detail, command) = missing_engine_instructions();
-            let _ = app.emit("engine-status", json!({
-                "state": "missing",
-                "detail": detail,
-                "command": command
-            }));
+            let _ = app.emit(
+                "engine-status",
+                json!({
+                    "state": "missing",
+                    "detail": detail,
+                    "command": command
+                }),
+            );
             return;
         }
         Err(e) => return emit_status("error", &e.to_string()),
