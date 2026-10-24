@@ -3,58 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>Pencil Download Manager</title>
-    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header>
-      <div class="brand">
-        <span class="logo" aria-hidden="true"></span>
-        <h1>Pencil Download Manager</h1>
-      </div>
-      <span id="engine-badge" class="badge starting">Starting…</span>
-    </header>
-
-    <form id="add-form" autocomplete="off">
-      <input id="url" type="text" placeholder="Paste a download link (http, https, ftp)" spellcheck="false" />
-      <button type="submit" id="add-btn">Download</button>
-    </form>
-    <p id="message" role="status"></p>
-    <section id="engine-needed" class="engine-needed" hidden aria-labelledby="engine-needed-title">
-      <h2 id="engine-needed-title">Download engine needed</h2>
-      <p id="engine-needed-detail">Install the download engine, then check again.</p>
-      <code id="engine-command"></code>
-      <div class="engine-needed-actions">
-        <button type="button" id="copy-engine-command">Copy command</button>
-        <button type="button" id="recheck-engine">Check again</button>
-      </div>
-    </section>
-    <details class="engine-path-settings">
-      <summary>Use my own engine path</summary>
-      <label for="engine-path">Absolute path to the executable</label>
-      <div class="engine-path-row">
-        <input id="engine-path" type="text" placeholder="/usr/bin/aria2c" spellcheck="false" />
-        <button type="button" id="save-engine-path">Save path</button>
-      </div>
-    </details>
-
-    <main>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th class="num">Size</th>
-            <th class="progress-col">Progress</th>
-            <th class="num">Speed</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-      <p id="empty">No downloads yet. Paste a link above to start.</p>
-    </main>
-
-    <script src="app.js"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

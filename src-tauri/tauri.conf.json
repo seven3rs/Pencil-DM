@@ -5,10 +5,13 @@
   "version": "0.1.0",
   "identifier": "strs.pencil.downloadmanager",
   "build": {
-    "frontendDist": "../ui"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -20,7 +23,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+      "devCsp": "default-src 'self'; connect-src ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
@@ -43,8 +47,16 @@
       }
     },
     "linux": {
-      "deb": { "depends": ["aria2"] },
-      "rpm": { "depends": ["aria2"] }
+      "deb": {
+        "depends": [
+          "aria2"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "aria2"
+        ]
+      }
     }
   }
 }

@@ -20,6 +20,8 @@ pub struct DownloadInfo {
     pub gid: String,
     pub status: String,
     pub name: String,
+    /// Full path of the first file on disk (empty until the engine knows it).
+    pub path: String,
     pub total: u64,
     pub completed: u64,
     pub speed: u64,
@@ -139,9 +141,12 @@ fn parse_info(v: &Value) -> DownloadInfo {
     let num = |k: &str| text(k).parse::<u64>().unwrap_or(0);
 
     let first_file = v.get("files").and_then(|f| f.get(0));
-    let mut name = first_file
+    let path = first_file
         .and_then(|f| f.get("path"))
         .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut name = Some(path.as_str())
         .and_then(|p| Path::new(p).file_name())
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
@@ -160,6 +165,7 @@ fn parse_info(v: &Value) -> DownloadInfo {
         gid: text("gid").to_string(),
         status: text("status").to_string(),
         name,
+        path,
         total: num("totalLength"),
         completed: num("completedLength"),
         speed: num("downloadSpeed"),
@@ -182,12 +188,15 @@ mod tests {
         assert_eq!((i.gid.as_str(), i.name.as_str()), ("abc", "movie.mkv"));
         assert_eq!((i.total, i.completed, i.speed), (1000, 250, 50));
         assert!(i.error.is_none());
+        assert_eq!(i.path, "/tmp/dl/movie.mkv");
     }
 
     #[test]
     fn falls_back_to_uri_when_path_is_empty() {
         let v = json!({"gid":"x","status":"waiting","files":[{"path":"","uris":[{"uri":"https://a/b.zip"}]}]});
-        assert_eq!(parse_info(&v).name, "https://a/b.zip");
+        let info = parse_info(&v);
+        assert_eq!(info.name, "https://a/b.zip");
+        assert_eq!(info.path, "");
     }
 
     #[tokio::test]

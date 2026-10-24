@@ -1,12 +1,12 @@
 # Pencil Download Manager
 
-Pencil Download Manager is an early-stage cross-platform desktop download manager built with Rust and Tauri v2. The current interface is a lightweight HTML/CSS/JavaScript prototype; the full feature set described in the agent playbook is not yet implemented.
+Pencil Download Manager is an early-stage cross-platform desktop download manager built with Rust and Tauri v2. The interface is a Svelte 5 + TypeScript app; the full feature set described in the agent playbook is not yet implemented.
 
 ## Project layout
 
 - `crates/engine`: verified engine installation, process launcher, and local JSON-RPC client.
 - `src-tauri`: desktop shell and commands exposed to the UI.
-- `ui`: current prototype frontend.
+- `ui`: Svelte 5 + TypeScript + Vite frontend (`src/lib` holds the testable logic, `src/components` the views).
 - `engine-manifest.json`: pinned engine version, URLs, and hashes embedded at compile time.
 - `scripts/verify-manifest.sh`: verifies pinned upstream artifacts.
 - `.github/workflows`: CI and draft release builds.
@@ -23,6 +23,9 @@ Requirements: stable Rust toolchain, Node.js 22/npm, and Tauri system dependenci
 
 ```sh
 npm ci
+npm run check
+npm test
+npm run build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p pdm-engine
@@ -37,4 +40,4 @@ See [SECURITY.md](SECURITY.md), [the threat model](docs/threat-model.md), and [s
 
 ## Release status
 
-This is a development build, not a production-ready 0.1.0 release. The browser extension, persistence and categories, scheduler, tray polish, media extraction, signed updater, full Svelte UI, and end-to-end desktop tests remain incomplete. The release workflow builds draft artifacts; verify each artifact and platform manually before publishing. See [docs/releasing.md](docs/releasing.md) and [docs/test-checklist.md](docs/test-checklist.md).
+This is a development build, not a production-ready 0.1.0 release. The browser extension, persistence and categories, scheduler, tray polish, media extraction, signed updater, and end-to-end desktop tests remain incomplete. The release workflow builds draft artifacts; verify each artifact and platform manually before publishing. See [docs/releasing.md](docs/releasing.md) and [docs/test-checklist.md](docs/test-checklist.md).
