@@ -111,6 +111,20 @@ impl EngineProcess {
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
 
+        // Hash again at the last practical point before process creation. A
+        // path-based spawn still cannot close the same-user race completely.
+        if let Some(expected) = &opts.expected_sha256 {
+            let actual = crate::install::sha256_file(&opts.bin)?;
+            if !actual.eq_ignore_ascii_case(expected) {
+                let _ = std::fs::remove_file(&rpc_config);
+                return Err(EngineError::HashMismatch {
+                    what: "engine binary immediately before launch".into(),
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(error) => {
