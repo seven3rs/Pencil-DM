@@ -705,7 +705,11 @@ mod tests {
         let zip_path = tmp.path().join("large-entry.zip");
         let mut writer = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
         writer
-            .start_file("pkg/engine.bin", zip::write::SimpleFileOptions::default())
+            .start_file(
+                "pkg/engine.bin",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
             .unwrap();
         let mut repeated = io::repeat(b'x').take(MAX_EXTRACTED_FILE_BYTES + 1);
         io::copy(&mut repeated, &mut writer).unwrap();
