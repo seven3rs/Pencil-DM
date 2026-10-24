@@ -183,7 +183,9 @@ async fn start_engine(app: tauri::AppHandle) {
         Ok(process) => {
             let state = app.state::<AppState>();
             let rpc = process.rpc.clone();
-            if let Ok(db) = store::open(&data_root().join("pencil.db")) { *state.db.lock().await = Some(db); }
+            if let Ok(db) = store::open(&data_root().join("pencil.db")) {
+                *state.db.lock().await = Some(db);
+            }
             *state.process.lock().await = Some(process);
             *state.rpc.write().await = Some(rpc);
             emit_status("ready", "");
@@ -228,7 +230,9 @@ async fn recheck_engine(app: tauri::AppHandle) -> Result<(), String> {
 async fn add_download(state: tauri::State<'_, AppState>, url: String) -> Result<String, String> {
     let rpc = state.rpc().await?;
     let gid = rpc.add_uri(&url).await.map_err(|e| e.to_string())?;
-    if let Some(db) = state.db.lock().await.as_ref() { let _ = store::save_snapshot(db, &gid, &url, "", "", "Other", "waiting", 0, 0, None); }
+    if let Some(db) = state.db.lock().await.as_ref() {
+        let _ = store::save_snapshot(db, &gid, &url, "", "", "Other", "waiting", 0, 0, None);
+    }
     Ok(gid)
 }
 
@@ -236,7 +240,22 @@ async fn add_download(state: tauri::State<'_, AppState>, url: String) -> Result<
 async fn list_downloads(state: tauri::State<'_, AppState>) -> Result<Vec<DownloadInfo>, String> {
     let rpc = state.rpc().await?;
     let items = rpc.list().await.map_err(|e| e.to_string())?;
-    if let Some(db) = state.db.lock().await.as_ref() { for item in &items { let _ = store::save_snapshot(db, &item.gid, "", &item.name, &item.path, "Other", &item.status, item.total, item.completed, item.error.as_deref()); } }
+    if let Some(db) = state.db.lock().await.as_ref() {
+        for item in &items {
+            let _ = store::save_snapshot(
+                db,
+                &item.gid,
+                "",
+                &item.name,
+                &item.path,
+                "Other",
+                &item.status,
+                item.total,
+                item.completed,
+                item.error.as_deref(),
+            );
+        }
+    }
     Ok(items)
 }
 
@@ -259,38 +278,89 @@ async fn remove_download(state: tauri::State<'_, AppState>, gid: String) -> Resu
 }
 
 #[tauri::command]
-async fn list_history(state: tauri::State<'_, AppState>) -> Result<Vec<store::HistoryItem>, String> {
+async fn list_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<store::HistoryItem>, String> {
     let db = state.db.lock().await;
-    let conn = db.as_ref().ok_or_else(|| "History database is not ready.".to_string())?;
+    let conn = db
+        .as_ref()
+        .ok_or_else(|| "History database is not ready.".to_string())?;
     store::history(conn)
 }
 
 #[tauri::command]
-async fn set_setting(state: tauri::State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+async fn set_setting(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     let db = state.db.lock().await;
-    store::set_setting(db.as_ref().ok_or_else(|| "Settings database is not ready.".to_string())?, &key, &value)
+    store::set_setting(
+        db.as_ref()
+            .ok_or_else(|| "Settings database is not ready.".to_string())?,
+        &key,
+        &value,
+    )
 }
 
 #[tauri::command]
 async fn get_settings(state: tauri::State<'_, AppState>) -> Result<Vec<(String, String)>, String> {
     let db = state.db.lock().await;
-    store::settings(db.as_ref().ok_or_else(|| "Settings database is not ready.".to_string())?)
+    store::settings(
+        db.as_ref()
+            .ok_or_else(|| "Settings database is not ready.".to_string())?,
+    )
 }
 
 #[tauri::command]
-async fn list_categories(state: tauri::State<'_, AppState>) -> Result<Vec<(String, String, String, String)>, String> {
+async fn list_categories(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<(String, String, String, String)>, String> {
     let db = state.db.lock().await;
-    let conn = db.as_ref().ok_or_else(|| "Categories database is not ready.".to_string())?;
-    let mut stmt = conn.prepare("SELECT id,name,extensions,default_dir FROM categories ORDER BY name").map_err(|e| e.to_string())?;
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let conn = db
+        .as_ref()
+        .ok_or_else(|| "Categories database is not ready.".to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id,name,extensions,default_dir FROM categories ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn update_category(state: tauri::State<'_, AppState>, id: String, name: String, extensions: String, default_dir: String) -> Result<(), String> {
-    if name.trim().is_empty() || name.len() > 80 || extensions.len() > 2048 || default_dir.trim().is_empty() || default_dir.len() > 1024 { return Err("Invalid category fields.".into()); }
+async fn update_category(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+    extensions: String,
+    default_dir: String,
+) -> Result<(), String> {
+    if name.trim().is_empty()
+        || name.len() > 80
+        || extensions.len() > 2048
+        || default_dir.trim().is_empty()
+        || default_dir.len() > 1024
+    {
+        return Err("Invalid category fields.".into());
+    }
     let db = state.db.lock().await;
-    let conn = db.as_ref().ok_or_else(|| "Categories database is not ready.".to_string())?;
-    conn.execute("UPDATE categories SET name=?1,extensions=?2,default_dir=?3 WHERE id=?4", rusqlite::params![name.trim(), extensions.to_ascii_lowercase(), default_dir.trim(), id]).map_err(|e| e.to_string())?; Ok(())
+    let conn = db
+        .as_ref()
+        .ok_or_else(|| "Categories database is not ready.".to_string())?;
+    conn.execute(
+        "UPDATE categories SET name=?1,extensions=?2,default_dir=?3 WHERE id=?4",
+        rusqlite::params![
+            name.trim(),
+            extensions.to_ascii_lowercase(),
+            default_dir.trim(),
+            id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn main() {
@@ -301,7 +371,10 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let db = store::open(&data_root().join("pencil.db")).ok();
-            app.manage(AppState { db: Mutex::new(db), ..AppState::default() });
+            app.manage(AppState {
+                db: Mutex::new(db),
+                ..AppState::default()
+            });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { start_engine(handle).await });
             Ok(())
@@ -314,7 +387,11 @@ fn main() {
             remove_download,
             recheck_engine,
             set_engine_path,
-            list_history, set_setting, get_settings, list_categories, update_category
+            list_history,
+            set_setting,
+            get_settings,
+            list_categories,
+            update_category
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pencil Download Manager")
