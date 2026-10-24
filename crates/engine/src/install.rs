@@ -480,6 +480,36 @@ mod tests {
     }
 
     #[test]
+    fn failed_reinstall_preserves_previous_verified_installation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let (good_zip, manifest, entry) = fixture(
+            tmp.path(),
+            &[("pkg/engine.bin", b"engine-bytes")],
+            "engine.bin",
+            b"engine-bytes",
+        );
+        let installed = install_from_archive(&good_zip, &root, &manifest, &entry).unwrap();
+        fs::write(installed.parent().unwrap().join("preserve.txt"), b"keep").unwrap();
+
+        let (bad_zip, bad_manifest, mut bad_entry) = fixture(
+            tmp.path(),
+            &[("pkg/engine.bin", b"tampered-bytes")],
+            "engine.bin",
+            b"tampered-bytes",
+        );
+        bad_entry.bin_sha256 = sha(b"engine-bytes");
+        let bad_manifest = EngineManifest {
+            platforms: [("test".into(), bad_entry.clone())].into_iter().collect(),
+            ..bad_manifest
+        };
+        let error = install_from_archive(&bad_zip, &root, &bad_manifest, &bad_entry).unwrap_err();
+        assert!(matches!(error, EngineError::HashMismatch { .. }));
+        assert_eq!(fs::read(&installed).unwrap(), b"engine-bytes");
+        assert_eq!(fs::read(installed.parent().unwrap().join("preserve.txt")).unwrap(), b"keep");
+    }
+
+    #[test]
     fn rejects_archive_with_wrong_hash() {
         let tmp = tempfile::tempdir().unwrap();
         let (zip, manifest, mut entry) = fixture(

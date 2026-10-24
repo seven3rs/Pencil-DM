@@ -179,13 +179,12 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
     let method = req.method().clone();
     let origin = header(&req, "Origin");
     let auth = header(&req, "Authorization");
-    let host_ok = header(&req, "Host").is_some_and(|host| {
-        let Ok(security) = state.0.lock() else {
-            return false;
-        };
-        host == format!("127.0.0.1:{}", security.port)
-            || host == format!("localhost:{}", security.port)
-    });
+    let host = header(&req, "Host");
+    let host_ok = state
+        .0
+        .lock()
+        .map(|security| host_allowed(host.as_deref(), security.port))
+        .unwrap_or(false);
     if !host_ok {
         let _ = req.respond(error_response(403, "invalid Host header"));
         return;
@@ -490,6 +489,12 @@ fn token_authorized(header: Option<&str>, token: &str) -> bool {
         .is_some_and(|candidate| constant_time_eq(candidate, token))
 }
 
+fn host_allowed(host: Option<&str>, port: u16) -> bool {
+    host.is_some_and(|host| {
+        host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
+    })
+}
+
 fn origin_allowed(origin: Option<&str>, paired: Option<&str>) -> bool {
     origin.is_some_and(|origin| paired == Some(origin))
 }
@@ -575,6 +580,16 @@ mod tests {
             "attacker.test".into(),
         )]));
         assert!(validate_download(&item).is_err());
+    }
+
+    #[test]
+    fn host_validation_rejects_missing_forged_and_wrong_port_hosts() {
+        assert!(host_allowed(Some("127.0.0.1:1234"), 1234));
+        assert!(host_allowed(Some("localhost:1234"), 1234));
+        assert!(!host_allowed(None, 1234));
+        assert!(!host_allowed(Some("evil.test:1234"), 1234));
+        assert!(!host_allowed(Some("127.0.0.1:9999"), 1234));
+        assert!(!host_allowed(Some("127.0.0.1"), 1234));
     }
 
     #[test]
