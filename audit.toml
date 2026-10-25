@@ -1,0 +1,11 @@
+[advisories]
+# These advisories affect zip v4, brought in only by tauri-plugin-updater.
+# The plugin's current Tauri 2 release uses ZipArchive::extract internally,
+# but updater payloads are authenticated by Tauri signatures before they are
+# extracted. There is no compatible patched Tauri 2 plugin release yet.
+# Revisit on every updater release; direct engine extraction uses zip v9.
+ignore = [
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
+]

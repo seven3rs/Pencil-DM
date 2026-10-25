@@ -2,7 +2,7 @@
 
 Pencil Download Manager follows the same overall scheme as Audacity: the **code is free software under the GNU General Public License**, while the **name and logo are protected as trademarks** under a separate policy.
 
-Copyright (C) [YEAR] [YOUR NAME OR ORGANIZATION] and the Pencil Download Manager contributors.
+Copyright (C) 2026 Sato and the Pencil Download Manager contributors.
 
 ## What is covered by what
 
@@ -16,7 +16,7 @@ Copyright (C) [YEAR] [YOUR NAME OR ORGANIZATION] and the Pencil Download Manager
 
 ## The GPL part
 
-You may use, study, modify, and redistribute the source code under the terms of the GNU General Public License, version 3, or (at your option) any later version. Anyone who distributes this software or a modified version must make the corresponding source available under the same license.
+You may use, study, modify, and redistribute the source code under the terms of the GNU General Public License, version 3, or any later version. Anyone who distributes this software or a modified version must make the corresponding source available under the same license.
 
 ## Additional term: trademarks (GPLv3 section 7(e))
 
@@ -28,7 +28,7 @@ Add this to every new source file, using the comment style of the language:
 
 ```
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) [YEAR] [YOUR NAME OR ORGANIZATION] and the Pencil Download Manager contributors
+// Copyright (C) 2026 Sato and the Pencil Download Manager contributors
 ```
 
 ## Contributions
@@ -56,4 +56,4 @@ Pencil Download Manager uses [aria2](https://aria2.github.io/) as its download e
 
 ## License history
 
-Earlier commits of this repository, up to and including `[LAST MIT COMMIT]`, were published under the MIT License. Copies of that earlier code that people already have remain available under MIT. From `[FIRST GPL COMMIT]` onward, the project is licensed under GPL-3.0-or-later as described above. Any code contributed by others under the MIT License keeps its MIT notice.
+Earlier commits of this repository, up to and including `e50f8eb29a25693beae95f6a9f40f0e3c414238a`, were published under the MIT License. Copies of that earlier code that people already have remain available under MIT. From `0e32523d6ba366ac6a36aa2816f15608a42d8ef1` onward, the project is licensed under GPL-3.0-or-later as described above. Any code contributed by others under the MIT License keeps its MIT notice.
