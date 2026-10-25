@@ -46,25 +46,25 @@ jobs:
             target: ""
             args: "--bundles nsis"
             fetch: ""
-            bundle_dir: src-tauri/target/release/bundle
+            bundle_dir: target/release/bundle
           - name: macos-arm64
             platform: macos-latest
             target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin --bundles dmg"
             fetch: "--target aarch64-apple-darwin"
-            bundle_dir: src-tauri/target/aarch64-apple-darwin/release/bundle
+            bundle_dir: target/aarch64-apple-darwin/release/bundle
           - name: macos-x64
             platform: macos-latest
             target: x86_64-apple-darwin
             args: "--target x86_64-apple-darwin --bundles dmg"
             fetch: "--target x86_64-apple-darwin"
-            bundle_dir: src-tauri/target/x86_64-apple-darwin/release/bundle
+            bundle_dir: target/x86_64-apple-darwin/release/bundle
           - name: linux-x64
             platform: ubuntu-22.04
             target: ""
             args: "--bundles deb,rpm"
             fetch: "--verify-only"
-            bundle_dir: src-tauri/target/release/bundle
+            bundle_dir: target/release/bundle
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.platform }}
     steps:
@@ -145,6 +145,28 @@ jobs:
             Write-Host 'No complete Azure Trusted Signing configuration; using the PFX option if configured, otherwise unsigned.'
           }
 
+      # Tauri tries to import APPLE_CERTIFICATE whenever the variable exists, even if empty,
+      # so export the Apple secrets only when they are actually set (otherwise: unsigned build).
+      - name: Configure Apple signing (optional)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              val="${!v}"
+              [ -n "$val" ] && { echo "::add-mask::$val"; printf '%s<<EOF_PDM\n%s\nEOF_PDM\n' "$v" "$val" >> "$GITHUB_ENV"; }
+            done
+          else
+            echo "No Apple signing configuration; building an unsigned dmg."
+          fi
+
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -159,13 +181,6 @@ jobs:
           AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
           AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          # Tauri skips Apple signing/notarization when these are not configured.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
