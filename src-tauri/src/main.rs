@@ -179,7 +179,9 @@ async fn start_engine(app: tauri::AppHandle) {
     let (bin, expected_sha256) = match source {
         Ok(EngineSource::Managed(p)) => (
             p,
-            manifest.entry_for_current().map(|entry| entry.bin_sha256.clone()),
+            manifest
+                .entry_for_current()
+                .map(|entry| entry.bin_sha256.clone()),
         ),
         Ok(EngineSource::System(p)) => (p, None),
         Err(pdm_engine::EngineError::NotFound) => {

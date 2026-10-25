@@ -458,9 +458,28 @@ fn safe_download_name(value: &str) -> bool {
     let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
     !matches!(
         stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
-            | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
-            | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     )
 }
 
@@ -572,7 +591,10 @@ mod tests {
         item.file_name = None;
         for name in ["CON.txt", "file.", "file ", "bad\u{202e}exe", "C:evil.txt"] {
             item.file_name = Some(name.into());
-            assert!(validate_download(&item).is_err(), "accepted unsafe name {name:?}");
+            assert!(
+                validate_download(&item).is_err(),
+                "accepted unsafe name {name:?}"
+            );
         }
         item.file_name = None;
         item.headers = Some(std::collections::HashMap::from([(
@@ -611,7 +633,10 @@ mod tests {
             Some("chrome-extension://abcdefghijklmnop")
         ));
         assert!(!origin_allowed(Some("chrome-extension://evil"), None));
-        assert!(!origin_allowed(None, Some("chrome-extension://abcdefghijklmnop")));
+        assert!(!origin_allowed(
+            None,
+            Some("chrome-extension://abcdefghijklmnop")
+        ));
         assert!(!origin_allowed(None, None));
     }
 
