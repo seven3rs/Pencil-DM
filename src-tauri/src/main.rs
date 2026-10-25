@@ -40,6 +40,28 @@ struct AppState {
     pending_urls: std::sync::Mutex<Vec<String>>,
     last_clipboard_text: std::sync::Mutex<String>,
     minimize_to_tray: Arc<AtomicBool>,
+    /// Last `engine-status` payload, so a frontend that subscribes after it
+    /// was emitted (the engine starts as soon as the window is created, not
+    /// when the webview's JS has registered its listener) can still recover
+    /// the current state instead of being stuck on its initial placeholder.
+    engine_status: std::sync::Mutex<EngineStatusSnapshot>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct EngineStatusSnapshot {
+    state: String,
+    detail: String,
+    command: String,
+}
+
+impl Default for EngineStatusSnapshot {
+    fn default() -> Self {
+        Self {
+            state: "starting".into(),
+            detail: String::new(),
+            command: String::new(),
+        }
+    }
 }
 
 impl AppState {
@@ -159,10 +181,27 @@ fn missing_engine_instructions() -> (String, String) {
     )
 }
 
+/// Record the status so a late/missed-event frontend can fetch it via
+/// `get_engine_status`, then emit it as before for listeners that are
+/// already subscribed.
+fn publish_engine_status(app: &tauri::AppHandle, state: &str, detail: &str, command: &str) {
+    if let Some(app_state) = app.try_state::<AppState>() {
+        if let Ok(mut snapshot) = app_state.engine_status.lock() {
+            *snapshot = EngineStatusSnapshot {
+                state: state.to_string(),
+                detail: detail.to_string(),
+                command: command.to_string(),
+            };
+        }
+    }
+    let _ = app.emit(
+        "engine-status",
+        json!({ "state": state, "detail": detail, "command": command }),
+    );
+}
+
 async fn start_engine(app: tauri::AppHandle) {
-    let emit_status = |state: &str, detail: &str| {
-        let _ = app.emit("engine-status", json!({ "state": state, "detail": detail }));
-    };
+    let emit_status = |state: &str, detail: &str| publish_engine_status(&app, state, detail, "");
     emit_status("starting", "");
 
     let manifest = match EngineManifest::embedded() {
@@ -186,14 +225,7 @@ async fn start_engine(app: tauri::AppHandle) {
         Ok(EngineSource::System(p)) => (p, None),
         Err(pdm_engine::EngineError::NotFound) => {
             let (detail, command) = missing_engine_instructions();
-            let _ = app.emit(
-                "engine-status",
-                json!({
-                    "state": "missing",
-                    "detail": detail,
-                    "command": command
-                }),
-            );
+            publish_engine_status(&app, "missing", &detail, &command);
             return;
         }
         Err(e) => return emit_status("error", &e.to_string()),
@@ -214,7 +246,7 @@ async fn start_engine(app: tauri::AppHandle) {
             }
             *state.process.lock().await = Some(process);
             *state.rpc.write().await = Some(rpc);
-            emit_status("ready", "");
+            publish_engine_status(&app, "ready", "", "");
         }
         Err(e) => emit_status("error", &e.to_string()),
     }
@@ -250,6 +282,14 @@ async fn set_engine_path(path: String) -> Result<(), String> {
 async fn recheck_engine(app: tauri::AppHandle) -> Result<(), String> {
     start_engine(app).await;
     Ok(())
+}
+
+/// Lets the frontend pull the current status on mount instead of relying
+/// solely on the one-shot `engine-status` event, which it can otherwise miss
+/// if its listener registers after the backend already emitted it.
+#[tauri::command]
+fn get_engine_status(state: tauri::State<'_, AppState>) -> EngineStatusSnapshot {
+    state.engine_status.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1212,6 +1252,7 @@ fn main() {
             resume_download,
             remove_download,
             recheck_engine,
+            get_engine_status,
             set_engine_path,
             list_history,
             set_setting,

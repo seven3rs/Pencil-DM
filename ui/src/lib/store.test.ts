@@ -27,6 +27,7 @@ function setup() {
     removeDownload: vi.fn(async (_gid: string) => {}),
     recheckEngine: vi.fn(async () => {}),
     setEnginePath: vi.fn(async (_path: string) => {}),
+    getEngineStatus: vi.fn(async (): Promise<EngineStatus> => ({ state: "starting", detail: "", command: "" })),
     onEngineStatus: vi.fn(async (h: (s: EngineStatus) => void) => {
       statusHandler = h;
       return () => {};

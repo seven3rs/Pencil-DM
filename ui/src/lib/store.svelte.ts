@@ -55,6 +55,12 @@ export class DownloadStore {
       }),
     ]);
     this.cleanups.push(...unlisten);
+    // The backend starts the engine as soon as the window is created, not
+    // when this listener finishes registering, so the "starting"/"ready"/etc.
+    // event can already have fired and been lost by this point. Pull the
+    // current status directly to recover from that race instead of being
+    // stuck showing the initial placeholder forever.
+    this.setEngine(await this.api.getEngineStatus());
     this.syncPolling();
   }
 

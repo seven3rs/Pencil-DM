@@ -11,6 +11,8 @@ export interface Api {
   removeDownload(gid: string): Promise<void>;
   recheckEngine(): Promise<void>;
   setEnginePath(path: string): Promise<void>;
+  /** Current engine status, for recovering from a missed `engine-status` event on startup. */
+  getEngineStatus(): Promise<EngineStatus>;
   onEngineStatus(handler: (status: EngineStatus) => void): Promise<() => void>;
   onEngineProgress(handler: (done: number, total: number | null) => void): Promise<() => void>;
 }
@@ -52,6 +54,7 @@ export const tauriApi: ExtendedApi = {
   removeDownload: (gid) => invoke("remove_download", { gid }),
   recheckEngine: () => invoke("recheck_engine"),
   setEnginePath: (path) => invoke("set_engine_path", { path }),
+  getEngineStatus: () => invoke<EngineStatus>("get_engine_status"),
   getSettings: () => invoke<[string, string][]>("get_settings"),
   setSpeedLimiter: (enabled, bytesPerSecond) => invoke("set_speed_limiter", { enabled, bytesPerSecond }),
   setDownloadSpeedLimit: (gid, bytesPerSecond) => invoke("set_download_speed_limit", { gid, bytesPerSecond }),
