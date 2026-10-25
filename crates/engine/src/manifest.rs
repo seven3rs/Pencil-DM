@@ -465,7 +465,10 @@ mod tests {
             b.sidecars["macos-aarch64"].mode,
             SidecarMode::BuildFromSource
         );
-        assert_eq!(b.sidecars["macos-x86_64"].target_triple, "x86_64-apple-darwin");
+        assert_eq!(
+            b.sidecars["macos-x86_64"].target_triple,
+            "x86_64-apple-darwin"
+        );
     }
 
     #[test]
@@ -488,11 +491,13 @@ mod tests {
         assert!(mutate(&|v| v["source"]["extract_dir"] = "../x".into()).is_err());
         assert!(mutate(&|v| v["source"]["tag"] = "a/b".into()).is_err());
         assert!(mutate(&|v| v["sidecars"]["macos-aarch64"]["mode"] = "run-it".into()).is_err());
-        assert!(mutate(&|v| v["sidecars"]["macos-aarch64"]["target_triple"] = "a b".into()).is_err());
         assert!(
-            mutate(&|v| v["sidecars"]["macos-aarch64"]["deployment_target"] = serde_json::Value::Null)
-                .is_err()
+            mutate(&|v| v["sidecars"]["macos-aarch64"]["target_triple"] = "a b".into()).is_err()
         );
+        assert!(mutate(
+            &|v| v["sidecars"]["macos-aarch64"]["deployment_target"] = serde_json::Value::Null
+        )
+        .is_err());
         assert!(mutate(&|v| v["sidecars"]["windows-x86_64"]["mode"] = "download".into()).is_ok());
         assert!(mutate(&|v| {
             v["platforms"]

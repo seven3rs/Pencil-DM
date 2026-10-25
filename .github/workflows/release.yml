@@ -91,9 +91,10 @@ jobs:
 
       # package-lock.json was generated on Linux, so it only pins Linux's optional
       # @rollup/rollup-* binary (npm/cli#4828); `npm ci` on Windows/macOS then has
-      # no matching entry to install. `npm install` re-resolves and fetches the
-      # right one for each runner instead of installing strictly from the lock.
+      # no matching entry to install. `npm install` alone does not add it either, so
+      # scripts/ensure-rollup-native.mjs installs the matching one (no-save).
       - run: npm install --no-audit --no-fund
+      - run: node scripts/ensure-rollup-native.mjs
 
       - name: Cache fetched/built aria2
         uses: actions/cache@v4
