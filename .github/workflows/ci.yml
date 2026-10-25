@@ -58,6 +58,11 @@ jobs:
         # in CI.
         run: cargo build -p pencil-download-manager --features tauri/custom-protocol
       - name: Run local HTTP download smoke test
+        # ubuntu-22.04 ships aria2 1.36.0, but the app normally raises its minimum
+        # to the latest upstream release (1.37.0) and would report the engine as
+        # missing. Keep the embedded minimum for this test.
+        env:
+          PDM_SKIP_ENGINE_MINIMUM_REFRESH: "1"
         run: xvfb-run -a python3 scripts/linux-e2e-smoke.py target/debug/pencil-download-manager
       - name: Upload failure screenshot
         if: failure()

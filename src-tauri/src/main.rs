@@ -102,7 +102,12 @@ where
         return resolve_engine(&engine_root(), manifest, progress).await;
     }
     let mut dynamic_manifest = manifest.clone();
-    dynamic_manifest.refresh_system_minimum().await;
+    // The refresh raises the floor to the newest upstream aria2 release, which
+    // distro packages (e.g. Ubuntu 22.04's 1.36.0 in CI) can lag behind. Setting
+    // this opts out and keeps the embedded minimum, so the engine is still found.
+    if std::env::var_os("PDM_SKIP_ENGINE_MINIMUM_REFRESH").is_none() {
+        dynamic_manifest.refresh_system_minimum().await;
+    }
     pdm_engine::resolve_system_engine(&dynamic_manifest, custom_engine_path().as_deref())
 }
 
@@ -289,7 +294,11 @@ async fn recheck_engine(app: tauri::AppHandle) -> Result<(), String> {
 /// if its listener registers after the backend already emitted it.
 #[tauri::command]
 fn get_engine_status(state: tauri::State<'_, AppState>) -> EngineStatusSnapshot {
-    state.engine_status.lock().map(|s| s.clone()).unwrap_or_default()
+    state
+        .engine_status
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
