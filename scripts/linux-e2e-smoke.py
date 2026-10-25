@@ -34,8 +34,14 @@ def request(method, path, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{DRIVER_PORT}{path}", data=data, method=method,
         headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=3) as response:
-        return json.loads(response.read() or b"{}")
+    try:
+        with urllib.request.urlopen(req, timeout=3) as response:
+            return json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        # WebDriver's 500 response usually contains the useful launch failure;
+        # preserve it instead of reporting only the status code.
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"WebDriver {method} {path} failed ({error.code}): {detail}") from error
 
 def wait_for(predicate, description, timeout=45):
     end = time.monotonic() + timeout

@@ -897,6 +897,12 @@ mod tests {
         let bin = install_from_archive(&zip, &root, &manifest, &entry).unwrap();
         assert!(is_installed(&root, &manifest, &entry));
         let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        #[cfg(not(unix))]
         permissions.set_readonly(false);
         fs::set_permissions(&bin, permissions).unwrap();
         fs::write(&bin, b"tampered").unwrap();
