@@ -170,6 +170,7 @@ footer p{max-width:560px}
     <nav aria-label="Primary">
       <ul>
         <li><a href="#features">Features</a></li>
+        <li><a href="#download">Download</a></li>
         <li><a href="#how">How it works</a></li>
         <li><a href="#build">Build</a></li>
         <li><a href="#status">Status</a></li>
@@ -185,14 +186,14 @@ footer p{max-width:560px}
     <h1><span class="big">Pencil</span><span class="small">Download Manager</span></h1>
     <p class="tagline">Sharpen your downloads. A fast, open-source download manager for Windows, macOS and Linux.</p>
     <p class="lede">Built with Rust and Tauri on top of aria2. Multi-connection downloads, a time-zone-aware scheduler and a browser extension in one small native app.</p>
-    <div class="status"><i aria-hidden="true"></i>Early development build. Build from source for now.</div>
+    <div class="status"><i aria-hidden="true"></i>Version 0.1.0. Installers only: Windows, macOS and Linux packages on the Releases page.</div>
     <div class="cmd">
       <code id="clone"><span class="p">$</span>git clone https://github.com/seven3rs/Pencil-Download-Manager.git</code>
       <button class="btn" type="button" data-copy="clone">Copy</button>
     </div>
     <div class="links">
       <a class="ghost" href="https://github.com/seven3rs/Pencil-Download-Manager">View on GitHub</a>
-      <a class="ghost" href="https://github.com/seven3rs/Pencil-Download-Manager/releases">Draft releases</a>
+      <a class="ghost" href="#download">Download</a>
     </div>
     <div class="stats">
       <div><strong>3</strong><span>platforms</span></div>
@@ -201,12 +202,25 @@ footer p{max-width:560px}
     </div>
   </div>
 
+  <section id="download">
+    <div class="wrap">
+      <h2>Download</h2>
+      <p class="sub">Installers only: no portable or unzip-and-run builds. Get them from the <a href="https://github.com/seven3rs/Pencil-Download-Manager/releases">Releases page</a>.</p>
+      <div class="feat">
+        <article><svg aria-hidden="true"><use href="#i-monitor"/></svg><div><h3>Windows</h3><p>The <code>-setup.exe</code> installer. Installs for your user account only, and includes aria2.</p></div></article>
+        <article><svg aria-hidden="true"><use href="#i-monitor"/></svg><div><h3>macOS</h3><p>The <code>.dmg</code> for Apple Silicon or Intel. Drag the app to Applications. aria2 is included.</p></div></article>
+        <article><svg aria-hidden="true"><use href="#i-monitor"/></svg><div><h3>Linux</h3><p>The <code>.deb</code> (Debian, Ubuntu) or <code>.rpm</code> (Fedora and relatives). Both install the system aria2 package as a dependency.</p></div></article>
+      </div>
+      <p class="note">Each release lists <code>SHA256SUMS</code>, the exact aria2 source tarball and its <code>COPYING</code> file. Compare the checksum of what you downloaded before installing.</p>
+    </div>
+  </section>
+
   <section id="features">
     <div class="wrap">
       <h2>What’s inside</h2>
       <p class="sub">The app is young, but these parts are already in the code.</p>
       <div class="feat">
-        <article><svg aria-hidden="true"><use href="#i-shield"/></svg><div><h3>Verified engine</h3><p>aria2 comes from a pinned release and is checked against SHA-256 hashes. It is checked again on every launch and repaired if it goes missing or gets modified.</p></div></article>
+        <article><svg aria-hidden="true"><use href="#i-shield"/></svg><div><h3>Verified engine</h3><p>aria2 is bundled with the Windows and macOS installers, from a pinned version checked against SHA-256 hashes. It is checked again on every launch; if it goes missing or gets modified the app does not run it and repairs it from a verified download. On Linux the system aria2 package is used.</p></div></article>
         <article><svg aria-hidden="true"><use href="#i-clock"/></svg><div><h3>Scheduler</h3><p>Weekday rules with start and stop times in any time zone. Queued downloads resume at the start time and pause at the stop time, with an optional speed cap.</p></div></article>
         <article><svg aria-hidden="true"><use href="#i-window"/></svg><div><h3>Browser extension</h3><p>A companion extension for Chromium browsers and Firefox sends downloads to the app over a paired local connection.</p></div></article>
         <article><svg aria-hidden="true"><use href="#i-gauge"/></svg><div><h3>Speed limits</h3><p>Set a global limit or a limit for a single download, anywhere from 1 KiB/s to 1 GiB/s.</p></div></article>
@@ -230,8 +244,8 @@ footer p{max-width:560px}
         <div class="node engine"><h3>Engine</h3><small>aria2 as a child process</small></div>
       </div>
       <ol class="steps">
-        <li><h3>Install</h3><p>The Windows installer sets up aria2 from the pinned release. On macOS and Linux the app finds aria2 on your system and shows install steps if it can’t.</p></li>
-        <li><h3>Stay verified</h3><p>On launch the managed engine is checked against its hashes, and repaired if needed. You can also point the app to your own aria2.</p></li>
+        <li><h3>Install</h3><p>Run the installer for your system. aria2 is bundled with the Windows and macOS installers. On Linux the package depends on the system aria2.</p></li>
+        <li><h3>Stay verified</h3><p>On launch the bundled engine is checked against its hash. If it is missing or modified, the app does not run it and repairs it from a verified download. On macOS and Linux you can also point the app to your own aria2.</p></li>
         <li><h3>Download</h3><p>Paste links into the app, or send them from your browser with the extension.</p></li>
       </ol>
     </div>
@@ -240,7 +254,7 @@ footer p{max-width:560px}
   <section id="build">
     <div class="wrap">
       <h2>Build from source</h2>
-      <p class="sub">There is no stable release yet, so run it from the repository.</p>
+      <p class="sub">Most people should use the installers above. Building from source is for contributors.</p>
       <div class="code">
         <button class="btn" type="button" data-copy="build">Copy</button>
         <pre id="build"><span class="c"># install dependencies</span>
@@ -264,7 +278,7 @@ npm run tauri build</pre>
   <section id="status">
     <div class="wrap">
       <h2>Where it stands</h2>
-      <p class="sub">This is a development build, not a production-ready 0.1.0. Release workflows build draft installers, and each one is verified by hand before it is published.</p>
+      <p class="sub">This is the first release, 0.1.0. Releases are installers only, and each one is verified by hand before it is published.</p>
       <div class="cols">
         <div>
           <h3><span class="dot" style="background:var(--amber)"></span>In progress</h3>

@@ -3,7 +3,7 @@ name = "pdm-engine"
 version = "0.1.0"
 edition = "2021"
 description = "Verified install, launch and RPC client for the Pencil Download Manager download engine"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
