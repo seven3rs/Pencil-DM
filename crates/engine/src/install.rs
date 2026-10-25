@@ -240,7 +240,18 @@ fn extract_and_swap(
 
     for i in 0..zip.len() {
         let mut file = zip.by_index(i)?;
-        let raw_name = file.name().to_string();
+        // zip 9 made `name()` fallible: it now rejects entries whose raw
+        // filename bytes aren't valid UTF-8 instead of lossily converting
+        // them. Treat that the same as any other unsafe/malformed entry
+        // name rather than failing the whole install with a raw ZipError.
+        let raw_name = match file.name() {
+            Ok(name) => name.into_owned(),
+            Err(_) => {
+                return Err(EngineError::UnsafeArchive(
+                    "entry has a non-UTF-8 file name".to_string(),
+                ));
+            }
+        };
         if !archive_name_is_safe(&raw_name) {
             return Err(EngineError::UnsafeArchive(raw_name));
         }

@@ -1,4 +1,8 @@
-import { defineConfig } from "vite";
+// vitest 5 stopped globally augmenting vite's `UserConfig` type with the
+// `test` option; `defineConfig` must now come from `vitest/config` (which
+// re-exports vite's own `defineConfig` merged with the test config types)
+// instead of `vite` directly.
+import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath } from "node:url";
 
