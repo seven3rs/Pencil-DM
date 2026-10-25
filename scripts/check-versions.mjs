@@ -15,7 +15,7 @@ for (const p of ["crates/engine/Cargo.toml", "src-tauri/Cargo.toml"]) found.push
 
 const lock = read("Cargo.lock");
 for (const name of ["pdm-engine", "pencil-download-manager"]) {
-  const m = lock.match(new RegExp(`\\[\\[package\\]\\]\\nname = "${name}"\\nversion = "([^"]+)"`));
+  const m = lock.match(new RegExp(`\\[\\[package\\]\\]\\r?\\nname = "${name}"\\r?\\nversion = "([^"]+)"`));
   found.push([`Cargo.lock (${name})`, m?.[1]]);
 }
 found.push(["src-tauri/tauri.conf.json", json("src-tauri/tauri.conf.json").version]);

@@ -24,21 +24,23 @@ if (!SEMVER.test(version)) {
 }
 
 // Each edit replaces exactly one match; zero matches means the file layout changed
-// and this script (and check-versions.mjs) needs updating, so fail loudly.
+// and this script (and check-versions.mjs) needs updating, so fail loudly. Edits are
+// collected per file and written only after every one has succeeded, so a failure
+// never leaves the tree half-updated. Only the version text is replaced, so CRLF or
+// LF line endings are preserved as they are.
+const contents = new Map();
 const edit = (file, pattern, label = file) => {
-  const path = join(root, file);
-  const text = readFileSync(path, "utf8");
+  const text = contents.get(file) ?? readFileSync(join(root, file), "utf8");
   let hits = 0;
   const next = text.replace(pattern, (_m, pre, _old, post = "") => {
     hits += 1;
     return `${pre}${version}${post}`;
   });
   if (hits !== 1) {
-    console.error(`${label}: expected exactly one version field, found ${hits}.`);
+    console.error(`${label}: expected exactly one version field, found ${hits}. Nothing was changed.`);
     process.exit(1);
   }
-  writeFileSync(path, next);
-  console.log(`updated ${label}`);
+  contents.set(file, next);
 };
 
 // First `version = "..."` inside the [package] table.
@@ -47,7 +49,7 @@ edit("crates/engine/Cargo.toml", cargoPackage);
 edit("src-tauri/Cargo.toml", cargoPackage);
 
 for (const name of ["pdm-engine", "pencil-download-manager"]) {
-  edit("Cargo.lock", new RegExp(`(\\[\\[package\\]\\]\\nname = "${name}"\\nversion = ")([^"]+)(")`), `Cargo.lock (${name})`);
+  edit("Cargo.lock", new RegExp(`(\\[\\[package\\]\\]\\r?\\nname = "${name}"\\r?\\nversion = ")([^"]+)(")`), `Cargo.lock (${name})`);
 }
 
 // Top-level "version" (two-space indent) in the JSON files.
@@ -58,4 +60,8 @@ for (const f of ["package.json", "src-tauri/tauri.conf.json", "extension/manifes
 edit("package-lock.json", jsonTop, "package-lock.json");
 edit("package-lock.json", /^(  "packages":\s*\{\s*"":\s*\{[^}]*?"version":\s*")([^"]+)(")/m, 'package-lock.json (packages[""])');
 
+for (const [file, text] of contents) {
+  writeFileSync(join(root, file), text);
+  console.log(`updated ${file}`);
+}
 console.log(`\nVersion set to ${version}. Add a "## ${version}" section to CHANGELOG.md, then commit and tag v${version}.`);
