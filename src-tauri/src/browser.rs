@@ -252,10 +252,7 @@ fn load_config(path: &Path) -> Option<StoredConfig> {
     let bytes = std::fs::read(path).ok()?;
     let config: StoredConfig = serde_json::from_slice(&bytes).ok()?;
     let token_ok = config.token.len() == 64 && config.token.bytes().all(|b| b.is_ascii_hexdigit());
-    let origin_ok = config
-        .origin
-        .as_deref()
-        .map_or(true, valid_extension_origin);
+    let origin_ok = config.origin.as_deref().is_none_or(valid_extension_origin);
     (token_ok && origin_ok).then_some(config)
 }
 

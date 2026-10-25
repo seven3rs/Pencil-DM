@@ -57,12 +57,42 @@ struct Known {
 }
 
 const BROWSERS: [Known; 6] = [
-    Known { id: "chrome", name: "Google Chrome", family: Family::Chromium, extensions_url: "chrome://extensions" },
-    Known { id: "edge", name: "Microsoft Edge", family: Family::Chromium, extensions_url: "edge://extensions" },
-    Known { id: "brave", name: "Brave", family: Family::Chromium, extensions_url: "brave://extensions" },
-    Known { id: "vivaldi", name: "Vivaldi", family: Family::Chromium, extensions_url: "vivaldi://extensions" },
-    Known { id: "chromium", name: "Chromium", family: Family::Chromium, extensions_url: "chrome://extensions" },
-    Known { id: "firefox", name: "Firefox", family: Family::Firefox, extensions_url: "about:debugging#/runtime/this-firefox" },
+    Known {
+        id: "chrome",
+        name: "Google Chrome",
+        family: Family::Chromium,
+        extensions_url: "chrome://extensions",
+    },
+    Known {
+        id: "edge",
+        name: "Microsoft Edge",
+        family: Family::Chromium,
+        extensions_url: "edge://extensions",
+    },
+    Known {
+        id: "brave",
+        name: "Brave",
+        family: Family::Chromium,
+        extensions_url: "brave://extensions",
+    },
+    Known {
+        id: "vivaldi",
+        name: "Vivaldi",
+        family: Family::Chromium,
+        extensions_url: "vivaldi://extensions",
+    },
+    Known {
+        id: "chromium",
+        name: "Chromium",
+        family: Family::Chromium,
+        extensions_url: "chrome://extensions",
+    },
+    Known {
+        id: "firefox",
+        name: "Firefox",
+        family: Family::Firefox,
+        extensions_url: "about:debugging#/runtime/this-firefox",
+    },
 ];
 
 #[derive(Serialize, Clone, Debug)]
@@ -97,7 +127,11 @@ fn source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Ok(resources) = app.path().resource_dir() {
         candidates.push(resources.join("extension"));
     }
-    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("extension"));
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("extension"),
+    );
     candidates
         .into_iter()
         .find(|dir| dir.join("background.js").is_file())
@@ -113,20 +147,27 @@ pub fn export(app: &tauri::AppHandle, data_root: &Path, family: Family) -> Resul
 }
 
 pub fn copy_extension(source: &Path, target: &Path, family: Family) -> Result<(), String> {
-    std::fs::create_dir_all(target).map_err(|e| format!("Could not create {}: {e}", target.display()))?;
+    std::fs::create_dir_all(target)
+        .map_err(|e| format!("Could not create {}: {e}", target.display()))?;
     for file in EXTENSION_FILES {
         std::fs::copy(source.join(file), target.join(file))
             .map_err(|e| format!("Could not copy {file}: {e}"))?;
     }
-    std::fs::copy(source.join(family.manifest_source()), target.join("manifest.json"))
-        .map_err(|e| format!("Could not copy the extension manifest: {e}"))?;
+    std::fs::copy(
+        source.join(family.manifest_source()),
+        target.join("manifest.json"),
+    )
+    .map_err(|e| format!("Could not copy the extension manifest: {e}"))?;
     Ok(())
 }
 
 /// Keeps folders the user already loaded in step with the installed app version.
 pub fn refresh_existing(app: &tauri::AppHandle, data_root: &Path) {
     for family in [Family::Chromium, Family::Firefox] {
-        if export_dir(data_root, family).join("manifest.json").is_file() {
+        if export_dir(data_root, family)
+            .join("manifest.json")
+            .is_file()
+        {
             let _ = export(app, data_root, family);
         }
     }
@@ -137,7 +178,8 @@ pub fn open_extensions_page(browser_id: &str) -> Result<(), String> {
         .iter()
         .find(|known| known.id == browser_id)
         .ok_or_else(|| "Unknown browser.".to_string())?;
-    let launcher = locate(browser_id).ok_or_else(|| format!("{} was not found on this computer.", known.name))?;
+    let launcher = locate(browser_id)
+        .ok_or_else(|| format!("{} was not found on this computer.", known.name))?;
     launcher.open(known.extensions_url)
 }
 
@@ -244,7 +286,10 @@ mod tests {
             let target = tempfile::tempdir().unwrap();
             let out = target.path().join("ext");
             copy_extension(source.path(), &out, family).unwrap();
-            assert_eq!(std::fs::read_to_string(out.join("manifest.json")).unwrap(), expected);
+            assert_eq!(
+                std::fs::read_to_string(out.join("manifest.json")).unwrap(),
+                expected
+            );
             assert!(out.join("background.js").is_file());
             assert!(!out.join("manifest.firefox.json").exists());
         }
@@ -257,7 +302,10 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         std::fs::write(target.path().join("background.js"), "old").unwrap();
         copy_extension(source.path(), target.path(), Family::Chromium).unwrap();
-        assert_eq!(std::fs::read_to_string(target.path().join("background.js")).unwrap(), "background.js");
+        assert_eq!(
+            std::fs::read_to_string(target.path().join("background.js")).unwrap(),
+            "background.js"
+        );
         std::fs::remove_file(source.path().join("popup.js")).unwrap();
         assert!(copy_extension(source.path(), target.path(), Family::Chromium).is_err());
     }
@@ -272,7 +320,13 @@ mod tests {
     #[test]
     fn export_dir_is_stable_per_family() {
         let root = Path::new("/data");
-        assert_ne!(export_dir(root, Family::Chromium), export_dir(root, Family::Firefox));
-        assert_eq!(export_dir(root, Family::Chromium), export_dir(root, Family::Chromium));
+        assert_ne!(
+            export_dir(root, Family::Chromium),
+            export_dir(root, Family::Firefox)
+        );
+        assert_eq!(
+            export_dir(root, Family::Chromium),
+            export_dir(root, Family::Chromium)
+        );
     }
 }
