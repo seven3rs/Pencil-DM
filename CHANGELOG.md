@@ -22,3 +22,5 @@
 - The bundled engine is hash-checked at launch; if it is missing or modified the app falls back to a verified download and reports it.
 - Releases are installers only: Windows `.exe` (NSIS), macOS `.dmg`, Linux `.deb` and `.rpm`, plus the aria2 source tarball, its COPYING file, `ENGINE-SOURCE.txt` and `SHA256SUMS`.
 - About screen lists aria2's version, license and source link. New **Delete all app data** action. The Windows uninstaller removes the bundled and downloaded engine and can optionally delete history and settings.
+
+## 0.1.1
