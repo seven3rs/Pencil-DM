@@ -52,6 +52,13 @@ jobs:
         run: cargo build -p pencil-download-manager
       - name: Run local HTTP download smoke test
         run: xvfb-run -a python3 scripts/linux-e2e-smoke.py target/debug/pencil-download-manager
+      - name: Upload failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-e2e-failure-screenshot
+          path: /tmp/pdm-e2e-failure.png
+          if-no-files-found: ignore
 
   engine:
     name: engine (${{ matrix.os }})

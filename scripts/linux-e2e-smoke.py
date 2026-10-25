@@ -56,6 +56,43 @@ def wait_for(predicate, description, timeout=90):
         time.sleep(.25)
     raise RuntimeError(f"timed out waiting for {description}: {last}")
 
+def dump_diagnostics(base, driver_log):
+    """Best-effort failure diagnostics. Raising the original timeout is more
+    useful than losing it to a secondary error here, so every call is
+    independently guarded. This exists because repeatedly guessing at
+    startup-timing fixes without visibility into what the window actually
+    showed wastes CI runs; print the page itself instead."""
+    print("--- diagnostics: begin ---", file=sys.stderr)
+    try:
+        title = request("GET", base + "/title").get("value")
+        print(f"window title: {title!r}", file=sys.stderr)
+    except Exception as exc:
+        print(f"could not fetch window title: {exc}", file=sys.stderr)
+    try:
+        source = request("GET", base + "/source").get("value", "")
+        print(f"page source ({len(source)} chars, showing up to 4000):", file=sys.stderr)
+        print(source[:4000], file=sys.stderr)
+    except Exception as exc:
+        print(f"could not fetch page source: {exc}", file=sys.stderr)
+    try:
+        png_b64 = request("GET", base + "/screenshot", timeout=15).get("value")
+        if png_b64:
+            import base64
+            shot_path = pathlib.Path(tempfile.gettempdir()) / "pdm-e2e-failure.png"
+            shot_path.write_bytes(base64.b64decode(png_b64))
+            print(f"screenshot saved to {shot_path}", file=sys.stderr)
+    except Exception as exc:
+        print(f"could not capture screenshot: {exc}", file=sys.stderr)
+    try:
+        driver_log.flush()
+        with open(driver_log.name, "rb") as fh:
+            tail = fh.read().decode("utf-8", errors="replace")[-4000:]
+        print("tauri-driver/app stdout+stderr (last 4000 chars):", file=sys.stderr)
+        print(tail, file=sys.stderr)
+    except Exception as exc:
+        print(f"could not read tauri-driver log: {exc}", file=sys.stderr)
+    print("--- diagnostics: end ---", file=sys.stderr)
+
 def main():
     if not APP.is_file():
         raise RuntimeError(f"application binary not found: {APP}")
@@ -72,11 +109,16 @@ def main():
         threading.Thread(target=server.serve_forever, daemon=True).start()
         driver = None
         session = None
+        # tauri-driver spawns the app itself, so its stdout/stderr is the
+        # only place the app's own logs/panics show up. Previously discarded
+        # entirely; capture to a file so dump_diagnostics() can show it on
+        # failure instead of us flying blind.
+        driver_log = open(pathlib.Path(temporary) / "tauri-driver.log", "w+")
         try:
             driver = subprocess.Popen(
                 ["tauri-driver", "--port", str(DRIVER_PORT)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=driver_log,
+                stderr=subprocess.STDOUT,
             )
             wait_for(
                 lambda: socket.create_connection(("127.0.0.1", DRIVER_PORT), timeout=.2).close() is None,
@@ -103,18 +145,22 @@ def main():
                 request("POST", base + f"/element/{element}/click", {})
             def send_keys(element, value):
                 request("POST", base + f"/element/{element}/value", {"text": value, "value": list(value)})
-            wait_for(lambda: find('[role="status"]') if request("GET", base + "/url") else False, "app ready status element")
-            wait_for(lambda: "Ready" in request("GET", base + "/element/" + find('[role="status"]') + "/text").get("value", ""), "download engine ready")
-            click(find('button[title="Add URL (Ctrl/Cmd+N)"]'))
-            textarea = wait_for(lambda: find('textarea[placeholder="https://example.com/file.zip"]'), "add dialog")
-            url = f"http://127.0.0.1:{server.server_address[1]}/fixture.txt"
-            send_keys(textarea, url)
-            click(find('dialog button[type="submit"]'))
-            output = downloads / "fixture.txt"
-            wait_for(lambda: output.is_file() and output.stat().st_size == len(PAYLOAD), "download completion", timeout=60)
-            if output.read_bytes() != PAYLOAD:
-                raise RuntimeError("downloaded file content differs from fixture")
-            print("E2E PASS: app became ready, initiated a local HTTP download, and verified exact file contents")
+            try:
+                wait_for(lambda: find('[role="status"]') if request("GET", base + "/url") else False, "app ready status element")
+                wait_for(lambda: "Ready" in request("GET", base + "/element/" + find('[role="status"]') + "/text").get("value", ""), "download engine ready")
+                click(find('button[title="Add URL (Ctrl/Cmd+N)"]'))
+                textarea = wait_for(lambda: find('textarea[placeholder="https://example.com/file.zip"]'), "add dialog")
+                url = f"http://127.0.0.1:{server.server_address[1]}/fixture.txt"
+                send_keys(textarea, url)
+                click(find('dialog button[type="submit"]'))
+                output = downloads / "fixture.txt"
+                wait_for(lambda: output.is_file() and output.stat().st_size == len(PAYLOAD), "download completion", timeout=60)
+                if output.read_bytes() != PAYLOAD:
+                    raise RuntimeError("downloaded file content differs from fixture")
+                print("E2E PASS: app became ready, initiated a local HTTP download, and verified exact file contents")
+            except Exception:
+                dump_diagnostics(base, driver_log)
+                raise
         finally:
             if session:
                 try: request("DELETE", f"/session/{session}")
@@ -126,6 +172,7 @@ def main():
                 except subprocess.TimeoutExpired:
                     driver.kill()
                     driver.wait()
+            driver_log.close()
             server.shutdown()
             server.server_close()
 
