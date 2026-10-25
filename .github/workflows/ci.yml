@@ -49,7 +49,14 @@ jobs:
       - name: Install Tauri WebDriver adapter
         run: cargo install tauri-driver --locked
       - name: Build desktop application
-        run: cargo build -p pencil-download-manager
+        # tauri::generate_context!() picks between the bundled frontendDist and
+        # the devUrl dev server based on the `custom-protocol` feature. The
+        # `tauri build`/`tauri dev` CLIs pass it implicitly; a bare `cargo build`
+        # does not, so without it the debug binary bakes in devUrl
+        # (http://localhost:1420) and the WebView fails with "Could not connect
+        # to localhost: Connection refused" since nothing is serving that port
+        # in CI.
+        run: cargo build -p pencil-download-manager --features tauri/custom-protocol
       - name: Run local HTTP download smoke test
         run: xvfb-run -a python3 scripts/linux-e2e-smoke.py target/debug/pencil-download-manager
       - name: Upload failure screenshot
