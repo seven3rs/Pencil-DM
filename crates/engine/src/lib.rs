@@ -1,6 +1,7 @@
 //! Download-engine management for Pencil Download Manager:
 //! verified install (Scoop-style manifest), launch, and a small RPC client.
 
+pub mod bundled;
 pub mod error;
 pub mod install;
 pub mod launcher;
@@ -13,7 +14,9 @@ use std::process::Command;
 
 pub use error::{EngineError, Result};
 pub use launcher::{EngineProcess, LaunchOptions};
-pub use manifest::{parse_version, version_at_least, EngineManifest};
+pub use manifest::{
+    parse_version, version_at_least, BuildManifest, EngineManifest, SidecarMode,
+};
 pub use rpc::{DownloadInfo, DownloadOptions, RpcClient};
 
 pub(crate) fn random_token(len: usize) -> String {
@@ -27,6 +30,8 @@ pub(crate) fn random_token(len: usize) -> String {
 /// Where the engine binary comes from on this platform.
 #[derive(Debug, Clone)]
 pub enum EngineSource {
+    /// The aria2 shipped inside the installer, hash-checked before use.
+    Bundled(PathBuf),
     /// Installed and hash-verified under the app data directory.
     Managed(PathBuf),
     /// Found on PATH or a common system location (platforms without a bundled
@@ -37,7 +42,7 @@ pub enum EngineSource {
 impl EngineSource {
     pub fn path(&self) -> &Path {
         match self {
-            EngineSource::Managed(p) | EngineSource::System(p) => p,
+            EngineSource::Bundled(p) | EngineSource::Managed(p) | EngineSource::System(p) => p,
         }
     }
 }

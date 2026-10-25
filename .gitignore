@@ -4,3 +4,6 @@ node_modules
 /ui/dist
 *.log
 .DS_Store
+/src-tauri/binaries/
+/src-tauri/resources/licenses/
+/.engine-cache/

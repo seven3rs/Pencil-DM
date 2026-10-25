@@ -29,23 +29,34 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["pencil"] }
+      "desktop": {
+        "schemes": [
+          "pencil"
+        ]
+      }
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFERkIyM0RBOTI4QUJCRjgKUldUNHU0cVMyaVA3cllEejRmbytZMG94OGRJY25waXlvcnZySDZ6T3hWRmhWVHRNNnF6OWJWZisK",
       "endpoints": [
         "https://github.com/seven3rs/Pencil-Download-Manager/releases/latest/download/latest.json"
       ],
-      "windows": { "installMode": "passive" }
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "deb",
+      "rpm"
+    ],
     "category": "Utility",
     "shortDescription": "Fast, simple download manager",
     "longDescription": "Pencil Download Manager accelerates and organizes your downloads.",
-    "resources": { "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md" },
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -72,7 +83,7 @@
         ]
       }
     },
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "macOS": {
       "entitlements": "./Entitlements.plist"
     }

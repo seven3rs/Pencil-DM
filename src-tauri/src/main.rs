@@ -84,6 +84,18 @@ fn engine_root() -> PathBuf {
     data_root().join("engine")
 }
 
+/// The engine shipped inside the installer, if this build has one. Tauri places
+/// the sidecar next to the main executable, without the target-triple suffix.
+fn bundled_engine() -> Option<pdm_engine::bundled::BundledEngine> {
+    let sha256 = option_env!("PDM_BUNDLED_ENGINE_SHA256")?;
+    let name = if cfg!(windows) { "aria2c.exe" } else { "aria2c" };
+    let path = std::env::current_exe().ok()?.parent()?.join(name);
+    Some(pdm_engine::bundled::BundledEngine {
+        path,
+        sha256: sha256.to_string(),
+    })
+}
+
 fn custom_engine_path() -> Option<PathBuf> {
     std::fs::read_to_string(data_root().join("engine-path.txt"))
         .ok()
@@ -214,13 +226,33 @@ async fn start_engine(app: tauri::AppHandle) {
         Err(e) => return emit_status("error", &e.to_string()),
     };
 
-    // Normally a no-op: the installer already set the engine up and this just
-    // re-checks the binary's hash. If it is missing or modified it is repaired.
-    let source = resolve_app_engine(&manifest, |done, total| {
-        let _ = app.emit("engine-progress", json!({ "done": done, "total": total }));
-    })
-    .await;
+    // Order: user-configured path, bundled sidecar (hash-checked), managed
+    // download, system aria2. A bad bundled engine is never run; the reason is
+    // shown to the user and the remaining sources are tried.
+    let bundled = bundled_engine();
+    let custom = custom_engine_path();
+    let choice = pdm_engine::bundled::choose(
+        custom.as_deref(),
+        |path| pdm_engine::system_engine_is_compatible(path, &manifest),
+        bundled.as_ref(),
+    );
+    let mut bundled_warning = None;
+    let source = match choice {
+        pdm_engine::bundled::Choice::Custom(p) => Ok(EngineSource::System(p)),
+        pdm_engine::bundled::Choice::Bundled(p) => Ok(EngineSource::Bundled(p)),
+        pdm_engine::bundled::Choice::Fallback { warning } => {
+            if let Some(text) = &warning {
+                log_line(&format!("bundled engine skipped: {text}"));
+            }
+            bundled_warning = warning;
+            resolve_app_engine(&manifest, |done, total| {
+                let _ = app.emit("engine-progress", json!({ "done": done, "total": total }));
+            })
+            .await
+        }
+    };
     let (bin, expected_sha256) = match source {
+        Ok(EngineSource::Bundled(p)) => (p, bundled.as_ref().map(|b| b.sha256.clone())),
         Ok(EngineSource::Managed(p)) => (
             p,
             manifest
@@ -230,10 +262,20 @@ async fn start_engine(app: tauri::AppHandle) {
         Ok(EngineSource::System(p)) => (p, None),
         Err(pdm_engine::EngineError::NotFound) => {
             let (detail, command) = missing_engine_instructions();
+            let detail = match &bundled_warning {
+                Some(w) => format!("{w}\n\n{detail}"),
+                None => detail,
+            };
             publish_engine_status(&app, "missing", &detail, &command);
             return;
         }
-        Err(e) => return emit_status("error", &e.to_string()),
+        Err(e) => {
+            let detail = match &bundled_warning {
+                Some(w) => format!("{w}\n\n{e}"),
+                None => e.to_string(),
+            };
+            return emit_status("error", &detail);
+        }
     };
 
     let opts = LaunchOptions {
@@ -251,7 +293,7 @@ async fn start_engine(app: tauri::AppHandle) {
             }
             *state.process.lock().await = Some(process);
             *state.rpc.write().await = Some(rpc);
-            publish_engine_status(&app, "ready", "", "");
+            publish_engine_status(&app, "ready", bundled_warning.as_deref().unwrap_or(""), "");
         }
         Err(e) => emit_status("error", &e.to_string()),
     }

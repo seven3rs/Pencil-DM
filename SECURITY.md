@@ -49,3 +49,7 @@ See [the threat model](docs/threat-model.md) and [security findings](docs/securi
 ## Good-faith research
 
 We will not pursue action against people who act in good faith: research only on your own systems and data, no disruption of other users, and private reporting as described above.
+
+## Supply chain
+
+The download engine (aria2) is pinned to an exact version, URL and SHA-256 in `engine-manifest.json`. Release builds fetch or build only those pinned inputs and fail on any hash mismatch; there are no "latest" lookups at build time. The app re-checks the bundled engine's hash at every launch and refuses to run a modified copy.

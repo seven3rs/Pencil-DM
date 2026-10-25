@@ -26,4 +26,18 @@ for key in $(jq -r '.platforms | keys[]' "$manifest"); do
   if [ "$got_bin" != "$want_bin" ]; then echo "  binary hash mismatch: want $want_bin got $got_bin"; fail=1; else echo "  binary ok"; fi
 done
 
+# Pinned source tarball (the exact source offered under the GPL) and its COPYING.
+if jq -e '.source' "$manifest" >/dev/null; then
+  echo "== source tarball"
+  surl=$(jq -r '.source.url' "$manifest")
+  want_src=$(jq -r '.source.sha256' "$manifest")
+  sdir=$(jq -r '.source.extract_dir' "$manifest")
+  want_copying=$(jq -r '.source.copying_sha256' "$manifest")
+  curl -fsSL --retry 3 -o "$work/source.tar.xz" "$surl"
+  got_src=$(sha256sum "$work/source.tar.xz" | cut -d' ' -f1)
+  got_copying=$(tar -xJOf "$work/source.tar.xz" "$sdir/COPYING" | sha256sum | cut -d' ' -f1)
+  if [ "$got_src" != "$want_src" ]; then echo "  source hash mismatch: want $want_src got $got_src"; fail=1; else echo "  source ok"; fi
+  if [ "$got_copying" != "$want_copying" ]; then echo "  COPYING hash mismatch: want $want_copying got $got_copying"; fail=1; else echo "  COPYING ok"; fi
+fi
+
 exit $fail

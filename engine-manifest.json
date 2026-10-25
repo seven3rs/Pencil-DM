@@ -1,5 +1,12 @@
 {
   "version": "1.37.0",
+  "source": {
+    "url": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.xz",
+    "sha256": "60a420ad7085eb616cb6e2bdf0a7206d68ff3d37fb5a956dc44242eb2f79b66b",
+    "tag": "release-1.37.0",
+    "extract_dir": "aria2-1.37.0",
+    "copying_sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
   "platforms": {
     "windows-x86_64": {
       "url": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
@@ -14,6 +21,26 @@
       "extract_dir": "aria2-1.37.0-win-32bit-build1",
       "bin": "aria2c.exe",
       "bin_sha256": "b9cd71b275af11b63c33457b0f43f2f2675937070c563e195f223efd7fa4c74b"
+    }
+  },
+  "sidecars": {
+    "windows-x86_64": {
+      "mode": "download",
+      "target_triple": "x86_64-pc-windows-msvc"
+    },
+    "windows-x86": {
+      "mode": "download",
+      "target_triple": "i686-pc-windows-msvc"
+    },
+    "macos-aarch64": {
+      "mode": "build-from-source",
+      "target_triple": "aarch64-apple-darwin",
+      "deployment_target": "11.0"
+    },
+    "macos-x86_64": {
+      "mode": "build-from-source",
+      "target_triple": "x86_64-apple-darwin",
+      "deployment_target": "10.13"
     }
   },
   "min_system_version": "1.36.0"

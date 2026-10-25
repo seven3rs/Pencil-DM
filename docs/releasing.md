@@ -102,3 +102,16 @@ Use a disposable test machine or VM and a public test fork with its own updater 
 6. Also test the unsigned path by running a release workflow without `TAURI_SIGNING_PRIVATE_KEY`: installers should still build and the release should publish, but updater artifacts and `latest.json` are intentionally omitted. This verifies unsigned installation compatibility, not automatic updates.
 
 The default GitHub `releases/latest/download/latest.json` endpoint requires a public release. A private repository's release assets cannot be fetched anonymously by a desktop client. For private testing, provide an HTTPS update endpoint that authenticates clients safely; do not put a repository PAT in `tauri.conf.json` or ship it in the app.
+
+## Release checklist (installers only)
+
+Releases are always created as drafts by the release workflow; nothing publishes them automatically. Before publishing a draft by hand, confirm on the actual draft release page:
+
+- [ ] Assets are exactly: Windows NSIS `.exe`; macOS arm64 and x64 `.dmg`; Linux `.deb` and `.rpm`; plus `aria2-<version>.tar.xz`, `COPYING`, `ENGINE-SOURCE.txt` and `SHA256SUMS`. The `verify-assets` job passed.
+- [ ] aria2 source tarball and COPYING attached.
+- [ ] Hashes verified: `sha256sum -c SHA256SUMS` passes on the downloaded assets, and the `engine-manifest.json` pins match upstream (`verify-manifest` job).
+- [ ] Signatures checked (Windows Authenticode, macOS codesign/notarization) where signing secrets were configured, by inspecting the downloaded installers.
+- [ ] Windows and macOS installers contain aria2 and `licenses/aria2/COPYING`; the `.deb` and `.rpm` declare `Depends: aria2`.
+- [ ] No portable or unpacked artifacts attached (no `.zip`, `.tar.gz`, `.AppImage`, loose `.exe`, `.app` folders, `.nsis.zip`).
+- [ ] `docs/test-checklist.md` has been run on real machines, with results recorded.
+

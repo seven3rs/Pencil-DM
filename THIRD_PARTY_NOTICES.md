@@ -13,7 +13,9 @@ Pencil Download Manager uses a separate download-engine program that is download
 
 The app starts aria2 as its own process and controls it over local JSON-RPC. For that reason this project's code is not a derivative work of aria2 and keeps its own license.
 
-**If you redistribute the aria2 binary yourself** (for example in an offline installer or a package):
+**Where aria2 comes from.** aria2 1.37.0 (upstream tag `release-1.37.0`) is bundled inside the Windows and macOS installers. On Linux it is downloaded from the pinned upstream release or provided by the system `aria2` package; the `.deb` and `.rpm` packages only declare a dependency on it. The exact source used, [`aria2-1.37.0.tar.xz`](https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.xz), and aria2's `COPYING` file are attached to each GitHub release, and aria2's license text is installed with the app under `licenses/aria2/`.
+
+**If you redistribute the aria2 binary yourself** (for example in another installer or package):
 
 - include aria2's license text and this notice, or an equivalent entry in the app's About screen;
 - provide, or offer, the exact corresponding aria2 source for that version, for example the upstream source tarball for the version pinned in `engine-manifest.json`.

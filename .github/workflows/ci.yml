@@ -93,6 +93,72 @@ jobs:
       - name: Tests
         run: cargo test -p pdm-engine
 
+  engine-bundle:
+    name: bundled engine fetch + workspace tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Cache fetched/built aria2
+        uses: actions/cache@v4
+        with:
+          path: .engine-cache
+          key: aria2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine-manifest.json', 'scripts/fetch-engine.mjs') }}
+      - run: npm ci
+      - run: npm run build
+      # Linux does not bundle aria2: only the pinned source tarball and COPYING are verified.
+      - name: Verify pins (Linux)
+        if: runner.os == 'Linux'
+        run: node scripts/fetch-engine.mjs --verify-only
+      - name: Fetch pinned aria2 sidecar (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/fetch-engine.mjs
+      - name: Build aria2 for both macOS architectures
+        if: runner.os == 'macOS'
+        run: |
+          node scripts/fetch-engine.mjs --target x86_64-apple-darwin
+          node scripts/fetch-engine.mjs --target aarch64-apple-darwin
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Workspace tests
+        run: cargo test --workspace
+      - name: Show the sidecar files that were produced
+        if: runner.os != 'Linux'
+        shell: bash
+        run: ls -l src-tauri/binaries src-tauri/resources/licenses/aria2
+
+  version-sync:
+    name: versions agree everywhere
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-versions.mjs
+
+  release-guard-selftest:
+    name: installers-only guard rejects forbidden files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-release-assets.mjs --self-test
+
   windows-real-archive:
     name: engine real Windows archive layout
     runs-on: windows-latest

@@ -1,7 +1,7 @@
 name: release
 
-# Every platform uploads to the same draft release. The publish job runs only
-# after every matrix build succeeds, so users never see a partially built release.
+# Every platform uploads to the same DRAFT release. Nothing in this workflow
+# publishes it: a human reviews the draft's assets and publishes manually.
 on:
   push:
     tags: ["v*"]
@@ -44,19 +44,27 @@ jobs:
           - name: windows-x64
             platform: windows-latest
             target: ""
-            args: ""
+            args: "--bundles nsis"
+            fetch: ""
+            bundle_dir: src-tauri/target/release/bundle
           - name: macos-arm64
             platform: macos-latest
             target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles dmg"
+            fetch: "--target aarch64-apple-darwin"
+            bundle_dir: src-tauri/target/aarch64-apple-darwin/release/bundle
           - name: macos-x64
             platform: macos-latest
             target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles dmg"
+            fetch: "--target x86_64-apple-darwin"
+            bundle_dir: src-tauri/target/x86_64-apple-darwin/release/bundle
           - name: linux-x64
             platform: ubuntu-22.04
             target: ""
-            args: ""
+            args: "--bundles deb,rpm"
+            fetch: "--verify-only"
+            bundle_dir: src-tauri/target/release/bundle
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.platform }}
     steps:
@@ -83,17 +91,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Configure updater artifacts when a signing key is available
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            node -e 'const fs=require("fs"); const p="src-tauri/tauri.conf.json"; const c=JSON.parse(fs.readFileSync(p,"utf8")); c.bundle.createUpdaterArtifacts=false; fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");'
-            echo "Updater signing secret is absent; building ordinary unsigned installers."
-          else
-            node -e 'const c=require("./src-tauri/tauri.conf.json"); if (!c.plugins?.updater?.pubkey || c.plugins.updater.pubkey.startsWith("REPLACE_WITH_")) throw new Error("Generate an updater key pair and set plugins.updater.pubkey before enabling updater signing.");'
-          fi
+      - name: Cache fetched/built aria2
+        uses: actions/cache@v4
+        with:
+          path: .engine-cache
+          key: aria2-${{ matrix.name }}-${{ hashFiles('engine-manifest.json', 'scripts/fetch-engine.mjs') }}
+
+      # Pinned URL + SHA-256, fatal on mismatch. Windows: official zip. macOS: built from
+      # the pinned source tarball. Linux: only verifies the source pins (aria2 is not bundled).
+      - name: Fetch or build pinned aria2
+        run: node scripts/fetch-engine.mjs ${{ matrix.fetch }}
 
       - name: Prepare changelog notes for the update dialog
         id: release_notes
@@ -137,8 +144,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # PFX (OV/EV) signing. The custom sign command is a no-op when absent.
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -163,28 +168,81 @@ jobs:
           releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
-          updaterJsonPreferNsis: true
+          uploadUpdaterJson: false
           args: ${{ matrix.args }}
 
-  publish:
-    name: Publish release after all platform builds
-    needs: [verify-manifest, prepare-release, build]
+      # Fail the job if the bundle output holds anything but an allowed installer.
+      - name: Installers-only guard
+        shell: bash
+        run: |
+          version=$(node -p "require('./engine-manifest.json').version")
+          node scripts/check-release-assets.mjs --version "$version" --dir "${{ matrix.bundle_dir }}"
+
+  compliance:
+    name: Attach aria2 source, COPYING, ENGINE-SOURCE.txt and SHA256SUMS
+    needs: [prepare-release, build]
     runs-on: ubuntu-latest
-    if: ${{ success() }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG_NAME: ${{ github.ref_name }}
-      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
-      - name: Verify updater manifest was uploaded
-        if: env.HAS_UPDATER_KEY == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download and verify the exact aria2 source used
+        run: node scripts/fetch-engine.mjs --verify-only
+      - name: Write compliance files
         run: |
-          mkdir -p "$RUNNER_TEMP/release-check"
-          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/release-check"
-          node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(!j.version||!j.platforms||Object.keys(j.platforms).length<4){throw new Error("latest.json is missing its version or expected platform entries")};console.log(`Validated latest.json for ${j.version} (${Object.keys(j.platforms).join(", ")})`)' "$RUNNER_TEMP/release-check/latest.json"
+          set -euo pipefail
+          version=$(jq -r .version engine-manifest.json)
+          tag=$(jq -r .source.tag engine-manifest.json)
+          srcsha=$(jq -r .source.sha256 engine-manifest.json)
+          dir=$(jq -r .source.extract_dir engine-manifest.json)
+          mkdir -p out
+          cp ".engine-cache/aria2-${version}.tar.xz" "out/aria2-${version}.tar.xz"
+          tar -xJOf "out/aria2-${version}.tar.xz" "$dir/COPYING" > out/COPYING
+          {
+            echo "aria2 version: ${version}"
+            echo "Upstream tag: ${tag}"
+            echo "Source tarball: aria2-${version}.tar.xz"
+            echo "Source tarball SHA-256: ${srcsha}"
+            echo
+            echo "How the bundled engine was obtained:"
+            echo "- Windows installers: official upstream prebuilt zip (URL and SHA-256 pinned in engine-manifest.json), binary hash verified, extracted unmodified."
+            echo "- macOS installers (arm64, x64): built in CI from the source tarball above, unpatched, Apple system TLS, per-architecture."
+            echo "- Linux packages (.deb, .rpm): aria2 is NOT bundled; the packages depend on the system aria2 package."
+            echo
+            echo "aria2 is licensed GPL-2.0-or-later with an OpenSSL exception (see COPYING)."
+            echo "Pencil Download Manager is not affiliated with the aria2 project."
+          } > out/ENGINE-SOURCE.txt
+      - name: Checksums over every artifact, then upload
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir dist --clobber
+          cp out/* dist/
+          rm -f dist/SHA256SUMS
+          (cd dist && sha256sum -- * | sort -k2 > SHA256SUMS)
+          cat dist/SHA256SUMS
+          gh release upload "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --clobber out/* dist/SHA256SUMS
 
-      - name: Publish draft release
-        run: gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+  verify-assets:
+    name: Verify the draft release holds only installers and compliance files
+    needs: compliance
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: List actual release assets and apply the guard
+        run: |
+          set -euo pipefail
+          gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > release.json
+          test "$(jq -r .isDraft release.json)" = "true" || { echo "release is not a draft"; exit 1; }
+          jq -r '.assets[].name' release.json | tee assets.txt
+          node scripts/check-release-assets.mjs --version "$(jq -r .version engine-manifest.json)" --names-file assets.txt

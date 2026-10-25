@@ -153,6 +153,118 @@ impl EngineManifest {
     }
 }
 
+/// Pinned upstream source release. Used by the build-time fetch script and for
+/// the GPL source offer; the runtime installer never reads it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SourceEntry {
+    pub url: String,
+    /// SHA-256 of the source tarball.
+    pub sha256: String,
+    /// Upstream git tag, e.g. `release-1.37.0`.
+    pub tag: String,
+    /// Top-level directory inside the tarball.
+    pub extract_dir: String,
+    /// SHA-256 of the `COPYING` file inside the tarball.
+    pub copying_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SidecarMode {
+    /// Use the prebuilt archive pinned in `platforms`.
+    Download,
+    /// Build from the pinned source tarball.
+    BuildFromSource,
+}
+
+/// How the installer's bundled engine (Tauri sidecar) is produced per platform key.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SidecarEntry {
+    pub mode: SidecarMode,
+    /// Rust target triple used in the `aria2c-<triple>` sidecar file name.
+    pub target_triple: String,
+    /// Minimum macOS version to build for (build-from-source only).
+    pub deployment_target: Option<String>,
+}
+
+/// Build-time view of `engine-manifest.json`. Kept separate from
+/// [`EngineManifest`] so the runtime installer's data model is unchanged.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildManifest {
+    pub source: SourceEntry,
+    pub sidecars: BTreeMap<String, SidecarEntry>,
+}
+
+fn is_hex64(h: &str) -> bool {
+    h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+impl BuildManifest {
+    pub fn embedded() -> Result<Self> {
+        Self::parse(EMBEDDED_JSON)
+    }
+
+    /// Parse and cross-check against the runtime manifest in the same JSON.
+    pub fn parse(json: &str) -> Result<Self> {
+        let build: BuildManifest = serde_json::from_str(json)?;
+        let runtime = EngineManifest::parse(json)?;
+        build.validate(&runtime)?;
+        Ok(build)
+    }
+
+    fn validate(&self, runtime: &EngineManifest) -> Result<()> {
+        let bad = |msg: String| Err(EngineError::Manifest(msg));
+        let s = &self.source;
+        match reqwest::Url::parse(&s.url) {
+            Ok(u)
+                if u.scheme() == "https"
+                    && u.host_str().is_some()
+                    && u.username().is_empty()
+                    && u.password().is_none() => {}
+            _ => return bad("source: url must be an HTTPS URL without credentials".into()),
+        }
+        if !is_hex64(&s.sha256) || !is_hex64(&s.copying_sha256) {
+            return bad("source: sha256 values must be 64-char hex digests".into());
+        }
+        if !is_safe_relative(&s.extract_dir) {
+            return bad(format!("source: unsafe extract_dir {:?}", s.extract_dir));
+        }
+        if s.tag.is_empty()
+            || !s
+                .tag
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        {
+            return bad(format!("source: bad tag {:?}", s.tag));
+        }
+        for (key, e) in &self.sidecars {
+            if e.target_triple.is_empty()
+                || !e
+                    .target_triple
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return bad(format!("{key}: bad target_triple {:?}", e.target_triple));
+            }
+            if let Some(d) = &e.deployment_target {
+                if parse_version(d).is_none() {
+                    return bad(format!("{key}: bad deployment_target {d:?}"));
+                }
+            }
+            match e.mode {
+                SidecarMode::Download if !runtime.platforms.contains_key(key) => {
+                    return bad(format!("{key}: download mode needs a platforms entry"));
+                }
+                SidecarMode::BuildFromSource if e.deployment_target.is_none() => {
+                    return bad(format!("{key}: build-from-source needs deployment_target"));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Parse the first dotted numeric version in command output. For example,
 /// "aria2 version 1.37.0" becomes `[1, 37, 0]`.
 pub fn parse_version(output: &str) -> Option<Vec<u64>> {
@@ -342,6 +454,50 @@ mod tests {
     fn rejects_invalid_minimum_system_version() {
         let json = r#"{"version":"1","min_system_version":"latest","platforms":{}}"#;
         assert!(EngineManifest::parse(json).is_err());
+    }
+
+    #[test]
+    fn build_manifest_embedded_is_valid() {
+        let b = BuildManifest::embedded().expect("embedded build manifest must parse");
+        assert!(b.source.url.ends_with(".tar.xz"));
+        assert_eq!(b.sidecars["windows-x86_64"].mode, SidecarMode::Download);
+        assert_eq!(
+            b.sidecars["macos-aarch64"].mode,
+            SidecarMode::BuildFromSource
+        );
+        assert_eq!(b.sidecars["macos-x86_64"].target_triple, "x86_64-apple-darwin");
+    }
+
+    #[test]
+    fn old_manifests_without_build_fields_still_parse_as_runtime_manifests() {
+        let json = r#"{"version":"1","min_system_version":"1.36.0","platforms":{}}"#;
+        assert!(EngineManifest::parse(json).is_ok());
+        assert!(BuildManifest::parse(json).is_err());
+    }
+
+    #[test]
+    fn build_manifest_rejects_bad_source_and_sidecars() {
+        let good: serde_json::Value = serde_json::from_str(EMBEDDED_JSON).unwrap();
+        let mutate = |f: &dyn Fn(&mut serde_json::Value)| {
+            let mut v = good.clone();
+            f(&mut v);
+            BuildManifest::parse(&v.to_string())
+        };
+        assert!(mutate(&|v| v["source"]["url"] = "http://x/a.tar.xz".into()).is_err());
+        assert!(mutate(&|v| v["source"]["sha256"] = "abc".into()).is_err());
+        assert!(mutate(&|v| v["source"]["extract_dir"] = "../x".into()).is_err());
+        assert!(mutate(&|v| v["source"]["tag"] = "a/b".into()).is_err());
+        assert!(mutate(&|v| v["sidecars"]["macos-aarch64"]["mode"] = "run-it".into()).is_err());
+        assert!(mutate(&|v| v["sidecars"]["macos-aarch64"]["target_triple"] = "a b".into()).is_err());
+        assert!(
+            mutate(&|v| v["sidecars"]["macos-aarch64"]["deployment_target"] = serde_json::Value::Null)
+                .is_err()
+        );
+        assert!(mutate(&|v| v["sidecars"]["windows-x86_64"]["mode"] = "download".into()).is_ok());
+        assert!(mutate(&|v| {
+            v["platforms"].as_object_mut().unwrap().remove("windows-x86");
+        })
+        .is_err());
     }
 
     #[test]

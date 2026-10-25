@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "externalBin": ["binaries/aria2c"],
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "resources/licenses/aria2/*": "licenses/aria2/"
+    }
+  }
+}
