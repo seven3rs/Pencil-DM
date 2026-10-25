@@ -122,7 +122,7 @@ function extractTarball(tarball, destDir) {
   const list = spawnSync("tar", ["-tf", tarball], { encoding: "utf8", maxBuffer: 1 << 28 });
   if (list.status !== 0) die("tar: cannot list tarball");
   const prefix = `${source.extract_dir}/`;
-  for (const line of list.stdout.split("\n").filter(Boolean)) {
+  for (const line of list.stdout.split(/\r?\n/).filter(Boolean)) {
     safeEntryName(line.replace(/\/$/, ""));
     if (!line.startsWith(prefix) && line !== source.extract_dir && line !== `${source.extract_dir}/`)
       die(`tar: entry outside ${source.extract_dir}: ${line}`);
