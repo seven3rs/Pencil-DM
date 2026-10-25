@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
-  import { tauriApi } from "../lib/api";
+  import { tauriApi, type Aria2About } from "../lib/api";
   import type { DownloadStore } from "../lib/store.svelte";
 
   let { store, onclose, oncheckupdate }: { store: DownloadStore; onclose: () => void; oncheckupdate: () => void } = $props();
@@ -12,8 +12,11 @@
   let appVersion = $state("...");
   let loaded = $state(false);
   let busy = $state(false);
+  let aria2 = $state<Aria2About | null>(null);
+  let confirmDelete = $state(false);
 
   onMount(() => {
+    void tauriApi.aria2About().then((info) => aria2 = info).catch(() => {});
     void getVersion().then((version) => appVersion = version).catch(() => {});
     void (async () => {
       try {
@@ -65,6 +68,18 @@
       busy = false;
     }
   }
+
+  async function deleteAllData() {
+    busy = true;
+    try {
+      await tauriApi.deleteAllAppData(true);
+    } catch (error) {
+      store.say(String(error), true);
+      confirmDelete = false;
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 <section class="desktop-page" aria-labelledby="about-title">
@@ -90,6 +105,32 @@
     <button type="button" disabled={busy} onclick={() => void copyDiagnostics()}>{busy ? "Preparing report…" : "Copy diagnostics report"}</button>
     <p class="hint">The report includes the app version, operating system, engine status, and up to 200 sanitized setup-log lines. URLs, paths, and file names are excluded.</p>
   </section>
+
+  <section class="settings-card" aria-labelledby="engine-about-title">
+    <h3 id="engine-about-title">Download engine: aria2</h3>
+    {#if aria2}
+      <p>aria2 {aria2.version} (upstream tag <code>{aria2.tag}</code>), licensed under {aria2.license}.</p>
+      <button type="button" onclick={() => void tauriApi.openAria2Source().catch((error) => store.say(String(error), true))}>Open aria2 source code</button>
+      <p class="hint">Windows and macOS installers include this exact version; on Linux the system aria2 package is used. aria2 runs as a separate program that this app talks to locally.</p>
+    {:else}
+      <p>aria2 version information is unavailable.</p>
+    {/if}
+    <p class="hint">Not affiliated with the aria2 project.</p>
+  </section>
+
+  <section class="settings-card" aria-labelledby="data-title">
+    <h3 id="data-title">App data</h3>
+    <p class="hint">Deletes history, settings, schedules and any engine the app downloaded, then closes the app. Files you downloaded are not deleted.</p>
+    {#if confirmDelete}
+      <p><strong>This cannot be undone.</strong></p>
+      <div class="confirm-row">
+        <button type="button" disabled={busy} onclick={() => void deleteAllData()}>Yes, delete app data and quit</button>
+        <button type="button" disabled={busy} onclick={() => (confirmDelete = false)}>Cancel</button>
+      </div>
+    {:else}
+      <button type="button" disabled={busy} onclick={() => (confirmDelete = true)}>Delete all app data…</button>
+    {/if}
+  </section>
 </section>
 
 <style>
@@ -100,4 +141,5 @@
   .settings-card { display: grid; gap: 14px; padding: 18px; margin-bottom: 18px; border: 1px solid var(--border, #ddd); border-radius: 10px; }
   .settings-card label { display: flex; align-items: center; gap: 10px; }
   .settings-card button, .page-heading button { justify-self: start; }
+  .confirm-row { display: flex; gap: 10px; flex-wrap: wrap; }
 </style>

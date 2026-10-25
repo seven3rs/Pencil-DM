@@ -143,6 +143,29 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: ls -l src-tauri/binaries src-tauri/resources/licenses/aria2
+      # Prove the sidecar actually executes, not just that it was produced.
+      - name: Run the sidecar (--version)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          out=$(./src-tauri/binaries/aria2c-x86_64-pc-windows-msvc.exe --version | head -n 1)
+          echo "$out"
+          case "$out" in *"1.37.0"*) ;; *) echo "unexpected aria2 version"; exit 1;; esac
+      - name: Run the sidecar (--version, macOS arm64)
+        if: runner.os == 'macOS'
+        run: |
+          out=$(./src-tauri/binaries/aria2c-aarch64-apple-darwin --version | head -n 1)
+          echo "$out"
+          case "$out" in *"1.37.0"*) ;; *) echo "unexpected aria2 version"; exit 1;; esac
+          otool -L ./src-tauri/binaries/aria2c-aarch64-apple-darwin
+      # The x86_64 build is cross-compiled on an arm64 runner; running it needs Rosetta,
+      # which a runner may not have, so this step reports but does not gate.
+      - name: Run the sidecar (--version, macOS x86_64 via Rosetta, informational)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          ./src-tauri/binaries/aria2c-x86_64-apple-darwin --version | head -n 1
+          otool -L ./src-tauri/binaries/aria2c-x86_64-apple-darwin
 
   version-sync:
     name: versions agree everywhere

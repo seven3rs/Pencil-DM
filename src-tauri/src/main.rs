@@ -1113,6 +1113,94 @@ fn open_third_party_notices(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct Aria2About {
+    version: String,
+    tag: String,
+    source_url: String,
+    license: &'static str,
+}
+
+/// Version, upstream tag and pinned source link for the About screen. Read from
+/// the embedded manifest so the screen cannot drift from what is actually bundled.
+#[tauri::command]
+fn aria2_about() -> Result<Aria2About, String> {
+    let engine = EngineManifest::embedded().map_err(|e| e.to_string())?;
+    let build = pdm_engine::BuildManifest::embedded().map_err(|e| e.to_string())?;
+    Ok(Aria2About {
+        version: engine.version,
+        tag: build.source.tag,
+        source_url: build.source.url,
+        license: "GPL-2.0-or-later",
+    })
+}
+
+/// Opens the pinned aria2 source tarball URL from the embedded manifest. The URL is
+/// never taken from the frontend.
+#[tauri::command]
+fn open_aria2_source(app: tauri::AppHandle) -> Result<(), String> {
+    let build = pdm_engine::BuildManifest::embedded().map_err(|e| e.to_string())?;
+    app.opener()
+        .open_url(build.source.url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Deletes history, settings, schedules, the engine session and any downloaded engine,
+/// then quits. Files the user downloaded are never touched: a `downloads` folder inside
+/// the app data directory (the fallback save location) is skipped.
+#[tauri::command]
+async fn delete_all_app_data(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("Deleting app data needs confirmation.".into());
+    }
+    let root = data_root();
+    if root.file_name().and_then(|n| n.to_str()) != Some(APP_DIR_NAME) {
+        return Err("Refusing to delete an unexpected folder.".into());
+    }
+    // Stop the engine and close the database first; Windows keeps open files locked.
+    *state.rpc.write().await = None;
+    if let Some(process) = state.process.lock().await.take() {
+        process.shutdown().await;
+    }
+    *state.db.lock().await = None;
+
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            app.exit(0);
+            return Ok(());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut failed = 0usize;
+    for entry in entries.flatten() {
+        if entry.file_name() == "downloads" {
+            continue;
+        }
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let result = if is_dir {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if result.is_err() {
+            failed += 1;
+        }
+    }
+    if failed > 0 {
+        return Err(format!(
+            "{failed} item(s) could not be removed. Close other copies of the app and retry."
+        ));
+    }
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 async fn diagnostics_report(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let engine = if state.rpc.read().await.is_some() {
@@ -1340,6 +1428,9 @@ fn main() {
             read_dropped_links,
             open_third_party_notices,
             diagnostics_report,
+            aria2_about,
+            open_aria2_source,
+            delete_all_app_data,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pencil Download Manager")

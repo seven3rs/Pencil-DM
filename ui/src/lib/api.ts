@@ -17,6 +17,8 @@ export interface Api {
   onEngineProgress(handler: (done: number, total: number | null) => void): Promise<() => void>;
 }
 
+export interface Aria2About { version: string; tag: string; source_url: string; license: string; }
+
 export interface ScheduleRule { id: string; name: string; days: number[]; start_time: string; stop_time: string; timezone: string; speed_limit: number | null; enabled: boolean; }
 
 type ExtendedApi = Api & {
@@ -44,6 +46,9 @@ type ExtendedApi = Api & {
   readDroppedLinks(paths: string[]): Promise<string[]>;
   openThirdPartyNotices(): Promise<void>;
   diagnosticsReport(): Promise<string>;
+  aria2About(): Promise<Aria2About>;
+  openAria2Source(): Promise<void>;
+  deleteAllAppData(confirmed: boolean): Promise<void>;
 };
 
 export const tauriApi: ExtendedApi = {
@@ -79,6 +84,9 @@ export const tauriApi: ExtendedApi = {
   readDroppedLinks: (paths) => invoke<string[]>("read_dropped_links", { paths }),
   openThirdPartyNotices: () => invoke("open_third_party_notices"),
   diagnosticsReport: () => invoke<string>("diagnostics_report"),
+  aria2About: () => invoke<Aria2About>("aria2_about"),
+  openAria2Source: () => invoke("open_aria2_source"),
+  deleteAllAppData: (confirmed) => invoke("delete_all_app_data", { confirmed }),
   onEngineStatus: (handler) =>
     listen<{ state: EngineStatus["state"]; detail?: string; command?: string }>(
       "engine-status",

@@ -1,5 +1,13 @@
 {
   "bundle": {
-    "targets": ["deb", "rpm"]
+    "targets": ["deb", "rpm"],
+    "linux": {
+      "deb": {
+        "postRemoveScript": "linux/postrm.sh"
+      },
+      "rpm": {
+        "postRemoveScript": "linux/postun-rpm.sh"
+      }
+    }
   }
 }
