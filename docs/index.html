@@ -278,23 +278,27 @@ npm run tauri build</pre>
   <section id="status">
     <div class="wrap">
       <h2>Where it stands</h2>
-      <p class="sub">This is the first release, 0.1.0. Releases are installers only, and each one is verified by hand before it is published.</p>
+      <p class="sub">This is the first release, 0.1.0. Releases are installers only, and each one is checked by hand before it is published.</p>
       <div class="cols">
         <div>
-          <h3><span class="dot" style="background:var(--amber)"></span>In progress</h3>
+          <h3><span class="dot" style="background:var(--green)"></span>Included in 0.1.0</h3>
           <ul>
-            <li><b>Browser extension.</b> Pairing and sending downloads from Chromium and Firefox.</li>
-            <li><b>History and categories.</b> Saving the download list and sorting files by type.</li>
-            <li><b>Scheduler.</b> Time-zone rules, start and stop transitions, speed caps.</li>
-            <li><b>Tray polish.</b> A cleaner system tray experience.</li>
+            <li><b>Bundled engine.</b> aria2 ships inside the Windows and macOS installers and is verified on every launch.</li>
+            <li><b>Browser extension.</b> Pair it once, then send downloads from Chromium browsers and Firefox.</li>
+            <li><b>Scheduler.</b> Time-zone rules with start and stop times and optional speed caps.</li>
+            <li><b>Download history.</b> Your list is saved between sessions.</li>
+            <li><b>System tray.</b> Minimize to the tray, with pause and resume all.</li>
+            <li><b>Your data, your call.</b> Choose whether to keep or delete history and settings when you uninstall, or use Delete all app data in the app.</li>
           </ul>
         </div>
         <div>
-          <h3><span class="dot" style="background:var(--blue)"></span>Planned</h3>
+          <h3><span class="dot" style="background:var(--blue)"></span>Coming next</h3>
           <ul>
+            <li><b>Smarter categories.</b> Sorting files by type automatically.</li>
+            <li><b>Tray polish.</b> A cleaner system tray experience.</li>
             <li><b>Media extraction.</b> Download video and audio from supported pages.</li>
             <li><b>Signed updater.</b> Updates you can verify before they install.</li>
-            <li><b>End-to-end tests.</b> Automated tests that drive the real desktop app.</li>
+            <li><b>End-to-end tests.</b> A download smoke test runs on Linux in CI today; tests that drive the desktop app on Windows and macOS are planned.</li>
           </ul>
         </div>
       </div>
