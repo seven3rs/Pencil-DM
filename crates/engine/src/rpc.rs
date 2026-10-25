@@ -14,6 +14,42 @@ const STATUS_KEYS: [&str; 7] = [
     "files",
 ];
 
+/// How aria2 reserves disk space for a download before it starts writing
+/// (`--file-allocation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileAllocation {
+    /// Reserve the space instantly on filesystems that support it (ext4, btrfs,
+    /// xfs, NTFS). Avoids long start-up delays on large files.
+    #[default]
+    Falloc,
+    /// Do not reserve anything; the file grows as data arrives.
+    Off,
+    /// Reserve by writing zeros first. Works everywhere but can be very slow
+    /// for large files.
+    Prealloc,
+}
+
+impl FileAllocation {
+    /// The value aria2 expects for `file-allocation`.
+    pub fn as_aria2(self) -> &'static str {
+        match self {
+            FileAllocation::Falloc => "falloc",
+            FileAllocation::Off => "none",
+            FileAllocation::Prealloc => "prealloc",
+        }
+    }
+
+    /// Parses the aria2 spelling (`falloc`, `none`, `prealloc`), exactly as written.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "falloc" => Some(FileAllocation::Falloc),
+            "none" => Some(FileAllocation::Off),
+            "prealloc" => Some(FileAllocation::Prealloc),
+            _ => None,
+        }
+    }
+}
+
 /// Request-specific HTTP metadata forwarded to aria2 for a single download.
 #[derive(Debug, Clone, Default)]
 pub struct DownloadOptions {
@@ -22,6 +58,8 @@ pub struct DownloadOptions {
     pub user_agent: Option<String>,
     pub file_name: Option<String>,
     pub headers: Vec<(String, String)>,
+    /// Disk space reservation for this download; `None` leaves aria2's own default.
+    pub file_allocation: Option<FileAllocation>,
 }
 
 /// One download as shown in the UI.
@@ -121,7 +159,30 @@ impl RpcClient {
             ));
         }
         let aria_options = build_aria_options(options)?;
-        let mut params = vec![json!([parsed.as_str()])];
+        match self.add_uri_raw(parsed.as_str(), aria_options).await {
+            // Some aria2 builds do not know `falloc`. Fall back to aria2's own
+            // default instead of refusing every download on that platform.
+            Err(EngineError::Rpc(message))
+                if options.file_allocation == Some(FileAllocation::Falloc)
+                    && message.contains("file-allocation") =>
+            {
+                let retry = DownloadOptions {
+                    file_allocation: Some(FileAllocation::Prealloc),
+                    ..options.clone()
+                };
+                self.add_uri_raw(parsed.as_str(), build_aria_options(&retry)?)
+                    .await
+            }
+            other => other,
+        }
+    }
+
+    async fn add_uri_raw(
+        &self,
+        uri: &str,
+        aria_options: serde_json::Map<String, Value>,
+    ) -> Result<String> {
+        let mut params = vec![json!([uri])];
         if !aria_options.is_empty() {
             params.push(Value::Object(aria_options));
         }
@@ -232,6 +293,9 @@ fn build_aria_options(options: &DownloadOptions) -> Result<serde_json::Map<Strin
             return Err(EngineError::Rpc("invalid output file name".into()));
         }
         aria_options.insert("out".into(), json!(value));
+    }
+    if let Some(mode) = options.file_allocation {
+        aria_options.insert("file-allocation".into(), json!(mode.as_aria2()));
     }
     let mut headers = options.headers.clone();
     if let Some(cookie) = options.cookies.as_deref().filter(|s| !s.is_empty()) {
@@ -464,8 +528,10 @@ mod tests {
             user_agent: Some("PDM test".into()),
             file_name: Some("example.zip".into()),
             headers: vec![("X-Test".into(), "ok".into())],
+            file_allocation: Some(FileAllocation::Off),
         };
         let built = build_aria_options(&options).unwrap();
+        assert_eq!(built["file-allocation"], "none");
         assert_eq!(built["referer"], "https://example.test/page");
         assert_eq!(built["user-agent"], "PDM test");
         assert_eq!(built["out"], "example.zip");
@@ -477,6 +543,33 @@ mod tests {
             ..DownloadOptions::default()
         };
         assert!(build_aria_options(&bad).is_err());
+    }
+
+    #[test]
+    fn file_allocation_defaults_to_falloc_and_round_trips() {
+        assert_eq!(FileAllocation::default(), FileAllocation::Falloc);
+        for mode in [
+            FileAllocation::Falloc,
+            FileAllocation::Off,
+            FileAllocation::Prealloc,
+        ] {
+            assert_eq!(FileAllocation::parse(mode.as_aria2()), Some(mode));
+        }
+        for bad in ["", " none", "trunc", "FALLOC", "none; --dir=/", "falloc\n"] {
+            assert_eq!(FileAllocation::parse(bad), None, "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn omits_file_allocation_unless_requested() {
+        let built = build_aria_options(&DownloadOptions::default()).unwrap();
+        assert!(!built.contains_key("file-allocation"));
+        let options = DownloadOptions {
+            file_allocation: Some(FileAllocation::Falloc),
+            ..DownloadOptions::default()
+        };
+        let built = build_aria_options(&options).unwrap();
+        assert_eq!(built["file-allocation"], "falloc");
     }
 
     #[tokio::test]

@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { FileAllocationMode } from "./allocation";
 import type { EngineStatus, RawDownload } from "./types";
 
 /** Everything the store needs from the backend, so tests can swap in a fake. */
 export interface Api {
   listDownloads(): Promise<RawDownload[]>;
-  addDownload(url: string): Promise<string>;
+  /** `fileAllocation` overrides the saved default for this download only. */
+  addDownload(url: string, fileAllocation?: FileAllocationMode): Promise<string>;
   pauseDownload(gid: string): Promise<void>;
   resumeDownload(gid: string): Promise<void>;
   removeDownload(gid: string): Promise<void>;
@@ -70,7 +72,7 @@ export const tauriApi: ExtendedApi = {
   openBrowserExtensions: (browser) => invoke<string>("open_browser_extensions", { browser }),
   revealExtensionFolder: (family) => invoke("reveal_extension_folder", { family }),
   listDownloads: () => invoke<RawDownload[]>("list_downloads"),
-  addDownload: (url) => invoke<string>("add_download", { url }),
+  addDownload: (url, fileAllocation) => invoke<string>("add_download", { url, fileAllocation }),
   pauseDownload: (gid) => invoke("pause_download", { gid }),
   resumeDownload: (gid) => invoke("resume_download", { gid }),
   removeDownload: (gid) => invoke("remove_download", { gid }),

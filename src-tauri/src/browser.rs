@@ -456,6 +456,7 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
     let app_state = app.state::<crate::AppState>();
     let result = tauri::async_runtime::block_on(async {
         let rpc = app_state.rpc().await?;
+        let allocation = app_state.default_file_allocation().await;
         let mut gids = Vec::with_capacity(items.len());
         for item in &items {
             let headers = item
@@ -470,6 +471,7 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
                 user_agent: item.user_agent.clone(),
                 file_name: item.file_name.clone(),
                 headers,
+                file_allocation: Some(allocation),
             };
             gids.push(
                 rpc.add_uri_with_options(&item.url, &options)

@@ -1,4 +1,5 @@
 import type { Api } from "./api";
+import type { FileAllocationMode } from "./allocation";
 import { countByFilter, enrich, isRunning, matchesFilter } from "./downloads";
 import type { Download, EngineStatus, FilterId } from "./types";
 
@@ -127,9 +128,9 @@ export class DownloadStore {
   }
 
   /** Add one link; resolves to an error message, or null on success. */
-  async add(url: string): Promise<string | null> {
+  async add(url: string, fileAllocation?: FileAllocationMode): Promise<string | null> {
     try {
-      await this.api.addDownload(url);
+      await this.api.addDownload(url, fileAllocation);
       return null;
     } catch (e) {
       return String(e);

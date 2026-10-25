@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ALLOCATION_MODES, type FileAllocationMode } from "../lib/allocation";
   import { parseLinks } from "../lib/links";
   import type { DownloadStore } from "../lib/store.svelte";
 
@@ -7,6 +8,9 @@
   let dialog: HTMLDialogElement;
   let text = $state("");
   let busy = $state(false);
+  /** Empty means "use the default saved in Settings". */
+  let allocation = $state<"" | FileAllocationMode>("");
+  const allocationHint = $derived(ALLOCATION_MODES.find((m) => m.value === allocation)?.hint ?? "Uses the disk space setting from the About page (instant reservation unless you changed it).");
   /** Engine rejections by line number, shown next to the local validation. */
   let rejected = $state<Record<number, string>>({});
 
@@ -17,6 +21,7 @@
     if (open && !dialog.open) {
       rejected = {};
       text = initialText;
+      allocation = "";
       dialog.showModal();
     } else if (!open && dialog.open) {
       dialog.close();
@@ -30,7 +35,7 @@
     const failed: Record<number, string> = {};
     const rawLines = text.split(/\r?\n/);
     for (const link of valid) {
-      const error = await store.add(link.text);
+      const error = await store.add(link.text, allocation || undefined);
       if (error) {
         failed[link.line] = error;
       }
@@ -82,6 +87,16 @@
         </li>
       {/each}
     </ul>
+    <label class="allocation">
+      <span>Disk space</span>
+      <select bind:value={allocation} aria-describedby="allocation-hint">
+        <option value="">Default (from Settings)</option>
+        {#each ALLOCATION_MODES as mode (mode.value)}
+          <option value={mode.value}>{mode.label}</option>
+        {/each}
+      </select>
+    </label>
+    <p class="hint" id="allocation-hint">{allocationHint}</p>
     <div class="dialog-actions">
       <button type="button" onclick={onclose}>Cancel</button>
       <button type="submit" class="primary" disabled={!valid.length || busy || !store.ready}>

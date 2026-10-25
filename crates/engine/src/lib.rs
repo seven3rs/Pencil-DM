@@ -15,7 +15,7 @@ use std::process::Command;
 pub use error::{EngineError, Result};
 pub use launcher::{EngineProcess, LaunchOptions};
 pub use manifest::{parse_version, version_at_least, BuildManifest, EngineManifest, SidecarMode};
-pub use rpc::{DownloadInfo, DownloadOptions, RpcClient};
+pub use rpc::{DownloadInfo, DownloadOptions, FileAllocation, RpcClient};
 
 pub(crate) fn random_token(len: usize) -> String {
     rand::thread_rng()

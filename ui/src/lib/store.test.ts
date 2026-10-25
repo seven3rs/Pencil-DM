@@ -21,7 +21,7 @@ function setup() {
   const downloads: RawDownload[] = [row("a"), row("b", "paused")];
   const api = {
     listDownloads: vi.fn(async () => downloads.map((d) => ({ ...d }))),
-    addDownload: vi.fn(async (_url: string) => "gid"),
+    addDownload: vi.fn(async (_url: string, _allocation?: string) => "gid"),
     pauseDownload: vi.fn(async (_gid: string) => {}),
     resumeDownload: vi.fn(async (_gid: string) => {}),
     removeDownload: vi.fn(async (_gid: string) => {}),
@@ -147,6 +147,14 @@ describe("DownloadStore", () => {
     expect(await t.store.add("https://a.com/x")).toBeNull();
     t.api.addDownload.mockRejectedValueOnce("bad link");
     expect(await t.store.add("https://a.com/y")).toBe("bad link");
+  });
+
+  it("add passes a per-download disk allocation choice through, or leaves it to the saved default", async () => {
+    const t = setup();
+    await t.store.add("https://a.com/x");
+    expect(t.api.addDownload).toHaveBeenLastCalledWith("https://a.com/x", undefined);
+    await t.store.add("https://a.com/y", "none");
+    expect(t.api.addDownload).toHaveBeenLastCalledWith("https://a.com/y", "none");
   });
 
   it("shows engine errors and the missing-engine command", async () => {

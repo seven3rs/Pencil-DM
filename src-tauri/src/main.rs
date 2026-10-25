@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use pdm_engine::{
-    resolve_engine, system_engine_is_compatible, DownloadInfo, EngineManifest, EngineProcess,
-    EngineSource, LaunchOptions, RpcClient,
+    resolve_engine, system_engine_is_compatible, DownloadInfo, DownloadOptions, EngineManifest,
+    EngineProcess, EngineSource, FileAllocation, LaunchOptions, RpcClient,
 };
 use serde_json::json;
 mod browser;
@@ -27,6 +27,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock};
 
 const APP_DIR_NAME: &str = "strs.pencil.downloadmanager";
+const FILE_ALLOCATION_KEY: &str = "file_allocation";
 const NOT_READY: &str = "The download engine is still starting. Try again in a moment.";
 
 #[derive(Default)]
@@ -72,6 +73,22 @@ impl AppState {
             .await
             .clone()
             .ok_or_else(|| NOT_READY.to_string())
+    }
+
+    /// The saved "reserve disk space" default, or falloc when nothing valid is saved.
+    /// aria2 cannot change this option on a running engine, so it is applied to each
+    /// download when it is added.
+    async fn default_file_allocation(&self) -> FileAllocation {
+        let db = self.db.lock().await;
+        db.as_ref()
+            .and_then(|conn| store::settings(conn).ok())
+            .and_then(|items| {
+                items
+                    .into_iter()
+                    .find(|(key, _)| key == FILE_ALLOCATION_KEY)
+            })
+            .and_then(|(_, value)| FileAllocation::parse(&value))
+            .unwrap_or_default()
     }
 }
 
@@ -349,9 +366,30 @@ fn get_engine_status(state: tauri::State<'_, AppState>) -> EngineStatusSnapshot 
 }
 
 #[tauri::command]
-async fn add_download(state: tauri::State<'_, AppState>, url: String) -> Result<String, String> {
+async fn add_download(
+    state: tauri::State<'_, AppState>,
+    url: String,
+    file_allocation: Option<String>,
+) -> Result<String, String> {
     let rpc = state.rpc().await?;
-    let gid = rpc.add_uri(&url).await.map_err(|e| e.to_string())?;
+    // An explicit choice from the Add dialog wins; otherwise use the saved default.
+    let allocation = match file_allocation
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => FileAllocation::parse(value)
+            .ok_or_else(|| "Unknown disk space reservation mode.".to_string())?,
+        None => state.default_file_allocation().await,
+    };
+    let options = DownloadOptions {
+        file_allocation: Some(allocation),
+        ..DownloadOptions::default()
+    };
+    let gid = rpc
+        .add_uri_with_options(&url, &options)
+        .await
+        .map_err(|e| e.to_string())?;
     if let Some(db) = state.db.lock().await.as_ref() {
         let _ = store::save_snapshot(
             db,
@@ -499,6 +537,9 @@ async fn set_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    if key == FILE_ALLOCATION_KEY && FileAllocation::parse(&value).is_none() {
+        return Err("Choose falloc, none or prealloc for disk space reservation.".into());
+    }
     let db = state.db.lock().await;
     store::set_setting(
         db.as_ref()

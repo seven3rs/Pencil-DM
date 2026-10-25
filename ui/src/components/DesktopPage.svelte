@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
+  import { ALLOCATION_MODES, DEFAULT_ALLOCATION, parseAllocation, type FileAllocationMode } from "../lib/allocation";
   import { tauriApi, type Aria2About } from "../lib/api";
   import type { DownloadStore } from "../lib/store.svelte";
 
@@ -8,6 +9,7 @@
   let minimizeToTray = $state(true);
   let clipboardMonitor = $state(false);
   let startWithOs = $state(false);
+  let allocation = $state<FileAllocationMode>(DEFAULT_ALLOCATION);
   let checkUpdatesOnStartup = $state(true);
   let appVersion = $state("...");
   let loaded = $state(false);
@@ -25,6 +27,7 @@
         clipboardMonitor = settings.clipboard_monitor_enabled === "true";
         startWithOs = await tauriApi.getAutostartEnabled().catch(() => false);
         checkUpdatesOnStartup = settings.check_updates_on_startup !== "false";
+        allocation = parseAllocation(settings.file_allocation);
       } catch (error) {
         store.say(String(error), true);
       } finally {
@@ -43,6 +46,17 @@
       if (key === "clipboard_monitor_enabled") clipboardMonitor = !value;
       if (key === "check_updates_on_startup") checkUpdatesOnStartup = !value;
       return;
+    }
+  }
+
+  async function saveAllocation(value: FileAllocationMode) {
+    const previous = allocation;
+    allocation = value;
+    try {
+      await tauriApi.setSetting("file_allocation", value);
+    } catch (error) {
+      allocation = previous;
+      store.say(String(error), true);
     }
   }
 
@@ -95,6 +109,19 @@
     <label><input type="checkbox" bind:checked={checkUpdatesOnStartup} disabled={!loaded} onchange={(event) => { checkUpdatesOnStartup = event.currentTarget.checked; void saveBoolean("check_updates_on_startup", event.currentTarget.checked); }} /> Check for updates quietly on startup (default on)</label>
     <label><input type="checkbox" checked={startWithOs} disabled={!loaded} onchange={(event) => void toggleAutostart(event.currentTarget.checked)} /> Start with the operating system (default off)</label>
     <p class="hint">Clipboard contents are not read while the clipboard prompt is disabled.</p>
+  </section>
+
+  <section class="settings-card" aria-labelledby="allocation-title">
+    <h3 id="allocation-title">Disk space</h3>
+    <label>
+      Reserve disk space before downloading
+      <select value={allocation} disabled={!loaded} onchange={(event) => void saveAllocation(event.currentTarget.value as FileAllocationMode)}>
+        {#each ALLOCATION_MODES as mode (mode.value)}
+          <option value={mode.value}>{mode.label}</option>
+        {/each}
+      </select>
+    </label>
+    <p class="hint">{ALLOCATION_MODES.find((m) => m.value === allocation)?.hint} Applies to new downloads, including ones sent from the browser; you can also change it per download in the Add dialog. If a drive does not support instant reservation, choose "Don't reserve".</p>
   </section>
 
   <section class="settings-card">

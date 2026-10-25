@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- New **Disk space** option: choose how aria2 reserves space before a download starts. Instant reservation (`falloc`) is now the default; you can switch to "Don't reserve" (`none`) or the slow write-zeros mode (`prealloc`) globally on the About page, or per download in the Add dialog. Browser-extension downloads follow the global setting. If an aria2 build does not support `falloc`, the app falls back to aria2's own default instead of refusing the download.
 - App interface restyled to match the website: same colors, Inter and JetBrains Mono (bundled, no network fonts), logo and gradient progress bars.
 - New **Browser** page with a guided extension install (prepares a stable extension folder, opens Chrome, Edge, Brave, Vivaldi or Firefox at the right page) and live connection status.
 - Browser pairing now survives app restarts: the token and paired extension are kept, and the extension re-discovers the port. **Disconnect** resets it.
