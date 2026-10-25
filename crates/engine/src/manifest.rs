@@ -495,7 +495,10 @@ mod tests {
         );
         assert!(mutate(&|v| v["sidecars"]["windows-x86_64"]["mode"] = "download".into()).is_ok());
         assert!(mutate(&|v| {
-            v["platforms"].as_object_mut().unwrap().remove("windows-x86");
+            v["platforms"]
+                .as_object_mut()
+                .unwrap()
+                .remove("windows-x86");
         })
         .is_err());
     }

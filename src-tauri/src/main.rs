@@ -88,7 +88,11 @@ fn engine_root() -> PathBuf {
 /// the sidecar next to the main executable, without the target-triple suffix.
 fn bundled_engine() -> Option<pdm_engine::bundled::BundledEngine> {
     let sha256 = option_env!("PDM_BUNDLED_ENGINE_SHA256")?;
-    let name = if cfg!(windows) { "aria2c.exe" } else { "aria2c" };
+    let name = if cfg!(windows) {
+        "aria2c.exe"
+    } else {
+        "aria2c"
+    };
     let path = std::env::current_exe().ok()?.parent()?.join(name);
     Some(pdm_engine::bundled::BundledEngine {
         path,
