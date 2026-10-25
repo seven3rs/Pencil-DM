@@ -159,4 +159,21 @@ describe("DownloadStore", () => {
     expect(t.store.notice).toEqual({ text: "It broke", isError: true });
     t.store.stop();
   });
+
+  it("clears a poll error once the next poll succeeds, but keeps other errors", async () => {
+    const t = setup();
+    await t.store.start();
+    t.emit({ state: "ready" });
+    await flush();
+    t.api.listDownloads.mockRejectedValueOnce("network error: error sending request for url (http://127.0.0.1:1/jsonrpc)");
+    await t.store.refresh();
+    expect(t.store.notice.isError).toBe(true);
+    await t.store.refresh();
+    expect(t.store.notice).toEqual({ text: "", isError: false });
+
+    t.store.say("Could not remove it", true);
+    await t.store.refresh();
+    expect(t.store.notice.text).toBe("Could not remove it");
+    t.store.stop();
+  });
 });

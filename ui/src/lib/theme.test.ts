@@ -37,8 +37,8 @@ describe.each([["dark", dark], ["light", light]])("%s theme", (_name, theme) => 
   it.each(textPairs)("%s on %s has at least 4.5:1 contrast", (fg, bg) => {
     expect(contrast(theme[fg], theme[bg])).toBeGreaterThanOrEqual(4.5);
   });
-  it("keeps the pencil-yellow accent", () => {
-    expect(theme.accent.toLowerCase()).toBe("#f2c230");
+  it("keeps the pencil-yellow accent from the landing page", () => {
+    expect(theme.accent.toLowerCase()).toBe("#ffd43b");
   });
   it("has a focus ring and input borders of at least 3:1", () => {
     expect(contrast(theme.focus, theme.surface)).toBeGreaterThanOrEqual(3);

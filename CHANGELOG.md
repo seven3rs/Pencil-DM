@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- App interface restyled to match the website: same colors, Inter and JetBrains Mono (bundled, no network fonts), logo and gradient progress bars.
+- New **Browser** page with a guided extension install (prepares a stable extension folder, opens Chrome, Edge, Brave, Vivaldi or Firefox at the right page) and live connection status.
+- Browser pairing now survives app restarts: the token and paired extension are kept, and the extension re-discovers the port. **Disconnect** resets it.
+- Fixed the extension popup always reporting "not connected" and pairing failures going unnoticed in Chrome.
+- A busy discovery port no longer stops the whole app from starting.
+- Fixed the tray: right-clicking the icon no longer re-opens the hidden window or closes the menu; only a left click restores the window.
+- A failed engine poll no longer leaves a stuck error banner.
+- Release workflow: fixed the bundle folder used by the installers-only guard and skipped empty Apple signing secrets.
+
 ## 0.1.0
 
 - Initial development release of Pencil Download Manager.

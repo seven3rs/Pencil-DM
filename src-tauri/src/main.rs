@@ -6,6 +6,7 @@ use pdm_engine::{
 };
 use serde_json::json;
 mod browser;
+mod extension;
 mod scheduler;
 mod store;
 use chrono::{Datelike, Utc};
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -764,6 +765,62 @@ fn create_browser_pairing_code(state: tauri::State<'_, AppState>) -> Result<Stri
         .create_pairing_code()
 }
 
+fn with_browser<T>(
+    state: &tauri::State<'_, AppState>,
+    f: impl FnOnce(&browser::BrowserState) -> Result<T, String>,
+) -> Result<T, String> {
+    let guard = state
+        .browser
+        .lock()
+        .map_err(|_| "Browser integration lock failed".to_string())?;
+    f(guard.as_ref().ok_or_else(|| {
+        "Browser integration is unavailable. Restart the app and try again.".to_string()
+    })?)
+}
+
+#[tauri::command]
+fn get_browser_status(state: tauri::State<'_, AppState>) -> Result<browser::BrowserStatus, String> {
+    with_browser(&state, |browser| browser.status())
+}
+
+#[tauri::command]
+fn disconnect_browser(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    with_browser(&state, |browser| browser.disconnect())
+}
+
+#[tauri::command]
+fn list_browsers() -> Vec<extension::BrowserInfo> {
+    extension::detect()
+}
+
+/// Copies the extension to its stable folder and returns the folder path.
+#[tauri::command]
+fn prepare_extension(app: tauri::AppHandle, family: String) -> Result<String, String> {
+    let family = extension::Family::parse(&family)?;
+    extension::export(&app, &data_root(), family).map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Prepares the extension, then opens the browser's extensions page. Returns the folder.
+#[tauri::command]
+fn open_browser_extensions(app: tauri::AppHandle, browser: String) -> Result<String, String> {
+    let info = extension::detect()
+        .into_iter()
+        .find(|candidate| candidate.id == browser)
+        .ok_or_else(|| "Unknown browser.".to_string())?;
+    let path = extension::export(&app, &data_root(), extension::Family::parse(info.family)?)?;
+    extension::open_extensions_page(&browser)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn reveal_extension_folder(app: tauri::AppHandle, family: String) -> Result<(), String> {
+    let family = extension::Family::parse(&family)?;
+    let folder = extension::export(&app, &data_root(), family)?;
+    app.opener()
+        .open_path(folder.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[rustfmt::skip]
 fn schedule_rule_active(rule: &scheduler::ScheduleRule, now: chrono::DateTime<Utc>) -> bool {
     if !rule.enabled { return false; }
@@ -890,7 +947,10 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let resume = MenuItem::with_id(app, "resume-all", "Resume all", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &hide, &pause, &resume, &quit])?;
-    let mut builder = TrayIconBuilder::with_id("main-tray").menu(&menu);
+    // Right-click opens the menu; only a left click (or double click) restores the window.
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false);
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
@@ -925,8 +985,22 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, _event| {
-            focus_main_window(tray.app_handle());
+        .on_tray_icon_event(|tray, event| {
+            // The handler also receives enter, move, leave and right-click events. Reacting
+            // to those re-showed the hidden window and closed the menu a moment after it opened.
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                }
+            ) {
+                focus_main_window(tray.app_handle());
+            }
         })
         .build(app)?;
     Ok(())
@@ -1375,13 +1449,18 @@ fn main() {
             }
             let clipboard_app = app.handle().clone();
             tauri::async_runtime::spawn(async move { clipboard_monitor_loop(clipboard_app).await });
-            let browser = browser::start(app.handle().clone(), &data_root())
-                .map_err(std::io::Error::other)?;
-            *app.state::<AppState>()
-                .browser
-                .lock()
-                .map_err(|_| std::io::Error::other("Browser integration lock failed"))? =
-                Some(browser);
+            // A browser integration problem must not stop the download manager itself.
+            match browser::start(app.handle().clone(), &data_root()) {
+                Ok(browser) => {
+                    *app.state::<AppState>()
+                        .browser
+                        .lock()
+                        .map_err(|_| std::io::Error::other("Browser integration lock failed"))? =
+                        Some(browser);
+                }
+                Err(message) => eprintln!("Browser integration is unavailable: {message}"),
+            }
+            extension::refresh_existing(app.handle(), &data_root());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { start_engine(handle.clone()).await });
             let scheduler_handle = app.handle().clone();
@@ -1403,6 +1482,12 @@ fn main() {
             list_categories,
             update_category,
             create_browser_pairing_code,
+            get_browser_status,
+            disconnect_browser,
+            list_browsers,
+            prepare_extension,
+            open_browser_extensions,
+            reveal_extension_folder,
             set_speed_limiter,
             set_download_speed_limit,
             save_schedule_rules,

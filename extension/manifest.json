@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1QRr4xYUXV+3rEt8ZYDjWnL/TawmrP/NX77YvLHEGV0HQ6+qxE45/nHVfld36rupfYUHPBE5mOAw7hNDJ4x/OhKObPCm3tYouGA+SOxWfCVtlH1G19JJSVTRqsflkw2wXRG3CQoqMRiHQLgt1ZjvrcXexQRdmZwzYWJ6QTF0M6iW0CmIWjX/nSXmdUu8CxLHP1f37YimmM34WhPCOPENFlByLqap3maX1DOlJmORfBdXKhjK8tU8OEnBHzl9lI5dj7hKVE+QhUOhCPWJzosw7ejq/ycxPCSK+UNzxp90KJgWGZoc084hHbKAuCq0pn1+dYciEiEX0+j4UeDJBBJClwIDAQAB",
   "name": "Pencil Download Manager",
   "version": "0.1.0",
   "description": "Send browser downloads to Pencil Download Manager running locally.",

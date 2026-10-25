@@ -12,7 +12,8 @@
   import EnginePanel from "./components/EnginePanel.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
-  import BrowserConnect from "./components/BrowserConnect.svelte";
+  import BrowserPage from "./components/BrowserPage.svelte";
+  import BrowserHint from "./components/BrowserHint.svelte";
   import SchedulerPage from "./components/SchedulerPage.svelte";
   import DesktopPage from "./components/DesktopPage.svelte";
   import UpdateDialog from "./components/UpdateDialog.svelte";
@@ -23,6 +24,8 @@
   let menuOpen = $state(false);
   let schedulerOpen = $state(false);
   let desktopOpen = $state(false);
+  let browserOpen = $state(false);
+  let browserPaired = $state(false);
   let pendingAddText = $state("");
   let clipboardPrompt = $state("");
   let clipboardEnabled = $state(false);
@@ -78,6 +81,7 @@
     addOpen = true;
     desktopOpen = false;
     schedulerOpen = false;
+    browserOpen = false;
   }
 
   function isDownloadUrl(value: string): boolean {
@@ -202,7 +206,7 @@
 <svelte:window onkeydown={onKeydown} ondragover={(event) => { if (event.dataTransfer?.types.length) event.preventDefault(); }} ondrop={onDrop} />
 
 <div class="shell">
-  <TopBar {store} onadd={() => (addOpen = true)} onscheduler={() => { schedulerOpen = !schedulerOpen; desktopOpen = false; }} onabout={() => { desktopOpen = !desktopOpen; schedulerOpen = false; }} />
+  <TopBar {store} {browserPaired} onadd={() => (addOpen = true)} onscheduler={() => { schedulerOpen = !schedulerOpen; desktopOpen = false; browserOpen = false; }} onabout={() => { desktopOpen = !desktopOpen; schedulerOpen = false; browserOpen = false; }} onbrowser={() => { browserOpen = !browserOpen; schedulerOpen = false; desktopOpen = false; }} />
   <Sidebar {store} />
 
   <div class="main">
@@ -227,12 +231,14 @@
       <EnginePanel {store} />
     {/if}
 
-    {#if schedulerOpen}
+    {#if browserOpen}
+      <BrowserPage {store} onclose={() => (browserOpen = false)} onstatus={(paired) => (browserPaired = paired)} />
+    {:else if schedulerOpen}
       <SchedulerPage {store} onclose={() => (schedulerOpen = false)} />
     {:else if desktopOpen}
       <DesktopPage {store} onclose={() => (desktopOpen = false)} oncheckupdate={() => void checkForUpdates(false)} />
     {:else}
-      <BrowserConnect />
+      <BrowserHint paired={browserPaired} onsetup={() => (browserOpen = true)} onpaired={(paired) => (browserPaired = paired)} />
       <DownloadTable {store} onmenuchange={(open) => (menuOpen = open)} />
     {/if}
   </div>

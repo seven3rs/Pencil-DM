@@ -14,22 +14,43 @@ function hostIgnored(url, list) {
   } catch { return true; }
 }
 async function discover() {
-  const response = await fetch(DISCOVERY_URL, { cache: "no-store" });
-  if (!response.ok) throw new Error("Pencil is not running");
+  let response;
+  try { response = await fetch(DISCOVERY_URL, { cache: "no-store" }); }
+  catch { throw new Error("Pencil is not running. Open the app and try again."); }
+  if (!response.ok) throw new Error("Pencil is not running. Open the app and try again.");
   const data = await response.json();
-  if (!Number.isInteger(data.port) || data.port < 1 || data.port > 65535) throw new Error("Invalid local endpoint");
+  if (!Number.isInteger(data.port) || data.port < 1 || data.port > 65535) throw new Error("Pencil returned an invalid local endpoint");
   return data.port;
 }
-async function callApp(path, payload) {
-  const { token, port, origin } = await api.storage.local.get(["token", "port", "origin"]);
-  if (!token || !port || !origin) throw new Error("Pair the extension first");
+async function request(port, token, path, payload) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: path === "/v1/ping" ? "GET" : "POST",
     headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     body: path === "/v1/ping" ? undefined : JSON.stringify(payload),
     cache: "no-store"
   });
-  const result = await response.json();
+  let result = {};
+  try { result = await response.json(); } catch { /* non-JSON error body */ }
+  return { response, result };
+}
+// Talks to the app. The app can restart on a different port, so a network failure triggers one
+// rediscovery before giving up. A 401 means the pairing was reset in the app, so it is forgotten.
+async function callApp(path, payload) {
+  const saved = await api.storage.local.get(["token", "port", "origin"]);
+  if (!saved.token || !saved.port || !saved.origin) throw new Error("Pair the extension with Pencil first");
+  let port = saved.port;
+  let attempt;
+  try { attempt = await request(port, saved.token, path, payload); }
+  catch {
+    port = await discover();
+    if (port !== saved.port) await api.storage.local.set({ port });
+    attempt = await request(port, saved.token, path, payload);
+  }
+  const { response, result } = attempt;
+  if (response.status === 401 || response.status === 403) {
+    await api.storage.local.remove(["token", "port", "origin"]);
+    throw new Error("Pencil no longer recognises this extension. Pair it again.");
+  }
   if (!response.ok || result.ok === false) throw new Error(result.message || "Pencil rejected the request");
   return result;
 }
@@ -93,21 +114,31 @@ api.downloads.onCreated.addListener(async item => {
   }
 });
 
-api.runtime.onMessage.addListener(async message => {
-  if (message?.type === "pdm-pair") {
-    const port = await discover();
-    const origin = extensionOrigin();
-    const response = await fetch(`http://127.0.0.1:${port}/v1/pair`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: message.code, origin }), cache: "no-store"
-    });
-    const result = await response.json();
-    if (!response.ok || !result.token) throw new Error(result.message || "Pairing failed");
-    await api.storage.local.set({ token: result.token, port: result.port, origin });
-    return { ok: true };
-  }
+async function pair(code) {
+  const port = await discover();
+  const origin = extensionOrigin();
+  const response = await fetch(`http://127.0.0.1:${port}/v1/pair`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, origin }), cache: "no-store"
+  });
+  let result = {};
+  try { result = await response.json(); } catch { /* non-JSON error body */ }
+  if (!response.ok || !result.token) throw new Error(result.message || "Pairing failed");
+  await api.storage.local.set({ token: result.token, port: result.port, origin });
+  return { ok: true };
+}
+async function handleMessage(message) {
+  if (message?.type === "pdm-pair") return await pair(String(message.code || "").trim());
   if (message?.type === "pdm-status") {
-    try { await callApp("/v1/ping"); return { connected: true }; }
-    catch (error) { return { connected: false, message: String(error) }; }
+    try { await callApp("/v1/ping"); return { ok: true, connected: true }; }
+    catch (error) { return { ok: true, connected: false, message: String(error?.message || error) }; }
   }
+  return { ok: false, message: "Unknown request" };
+}
+// Chrome ignores a Promise returned from an async listener and only honours sendResponse with
+// `return true`, which is why status and pairing always looked broken there. This form works in
+// Chrome, Edge and Firefox.
+api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  handleMessage(message).then(sendResponse, error => sendResponse({ ok: false, message: String(error?.message || error) }));
+  return true;
 });

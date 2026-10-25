@@ -55,7 +55,15 @@
     "shortDescription": "Fast, simple download manager",
     "longDescription": "Pencil Download Manager accelerates and organizes your downloads.",
     "resources": {
-      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../extension/manifest.json": "extension/manifest.json",
+      "../extension/manifest.firefox.json": "extension/manifest.firefox.json",
+      "../extension/background.js": "extension/background.js",
+      "../extension/popup.html": "extension/popup.html",
+      "../extension/popup.css": "extension/popup.css",
+      "../extension/popup.js": "extension/popup.js",
+      "../extension/icon.png": "extension/icon.png",
+      "../extension/PRIVACY.md": "extension/PRIVACY.md"
     },
     "icon": [
       "icons/32x32.png",

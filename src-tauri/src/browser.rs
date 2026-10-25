@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -27,6 +27,34 @@ struct SecurityState {
     pairing: Option<Pairing>,
     allowed_origin: Option<String>,
     requests: VecDeque<Instant>,
+    /// Where token and paired origin are persisted so pairing survives app restarts.
+    config_path: Option<PathBuf>,
+    /// Unix seconds of the last authenticated request from the extension.
+    last_seen: Option<u64>,
+    /// Set when the loopback discovery socket could not be opened.
+    discovery_error: Option<String>,
+}
+
+/// What is written to `browser-connection.json`.
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+struct StoredConfig {
+    #[serde(default)]
+    port: u16,
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    origin: Option<String>,
+}
+
+/// Browser integration state shown in the app.
+#[derive(Debug, Serialize, Clone)]
+pub struct BrowserStatus {
+    pub paired: bool,
+    pub origin: Option<String>,
+    pub last_seen: Option<u64>,
+    pub port: u16,
+    pub discovery_ok: bool,
+    pub discovery_error: Option<String>,
 }
 
 struct Pairing {
@@ -69,7 +97,41 @@ impl BrowserState {
             pairing: None,
             allowed_origin: None,
             requests: VecDeque::new(),
+            config_path: None,
+            last_seen: None,
+            discovery_error: None,
         })))
+    }
+
+    pub fn status(&self) -> Result<BrowserStatus, String> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| "Browser integration lock failed".to_string())?;
+        Ok(BrowserStatus {
+            paired: state.allowed_origin.is_some(),
+            origin: state.allowed_origin.clone(),
+            last_seen: state.last_seen,
+            port: state.port,
+            discovery_ok: state.discovery_error.is_none(),
+            discovery_error: state.discovery_error.clone(),
+        })
+    }
+
+    /// Forgets the paired extension and rotates the token, so the old extension
+    /// copy can no longer talk to the app until it is paired again.
+    pub fn disconnect(&self) -> Result<(), String> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Browser integration lock failed".to_string())?;
+        let mut raw = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut raw);
+        state.token = hex::encode(raw);
+        state.allowed_origin = None;
+        state.pairing = None;
+        state.last_seen = None;
+        persist(&state)
     }
 
     pub fn create_pairing_code(&self) -> Result<String, String> {
@@ -92,18 +154,40 @@ impl BrowserState {
 
 pub fn start(app: tauri::AppHandle, data_dir: &Path) -> Result<BrowserState, String> {
     std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
-    let mut raw = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut raw);
-    let token = hex::encode(raw);
+    let config_path = data_dir.join("browser-connection.json");
+    // Reuse the previous token, paired origin and port so an already paired extension
+    // keeps working after the app restarts. Only a missing or damaged file starts over.
+    let stored = load_config(&config_path);
+    let token = match &stored {
+        Some(config) => config.token.clone(),
+        None => {
+            let mut raw = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut raw);
+            hex::encode(raw)
+        }
+    };
+    let preferred_port = stored.as_ref().map(|config| config.port).unwrap_or(0);
 
-    let main_server = Server::http(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
+    let main_server = match preferred_port {
+        0 => Server::http(("127.0.0.1", 0)),
+        port => Server::http(("127.0.0.1", port)).or_else(|_| Server::http(("127.0.0.1", 0))),
+    }
+    .map_err(|e| e.to_string())?;
     let port = main_server
         .server_addr()
         .to_ip()
         .ok_or_else(|| "browser server did not bind an IP socket".to_string())?
         .port();
     let state = BrowserState::new(port, token.clone());
-    write_private_config(&data_dir.join("browser-connection.json"), port, &token)?;
+    {
+        let mut security = state
+            .0
+            .lock()
+            .map_err(|_| "Browser integration lock failed".to_string())?;
+        security.allowed_origin = stored.and_then(|config| config.origin);
+        security.config_path = Some(config_path);
+        persist(&security)?;
+    }
 
     let shared = state.clone();
     std::thread::Builder::new()
@@ -117,37 +201,98 @@ pub fn start(app: tauri::AppHandle, data_dir: &Path) -> Result<BrowserState, Str
 
     // Extensions cannot read the app's private data file. This loopback-only discovery
     // socket reveals only the ephemeral port; all useful operations still need the token.
-    let discovery = Server::http(("127.0.0.1", DISCOVERY_PORT))
-        .map_err(|e| format!("browser discovery port {DISCOVERY_PORT} is unavailable: {e}"))?;
-    std::thread::Builder::new()
-        .name("pdm-browser-discovery".into())
-        .spawn(move || {
-            for request in discovery.incoming_requests() {
-                if request.method() == &Method::Get && request.url() == "/v1/discover" {
-                    let body = format!("{{\"port\":{port}}}");
-                    let _ = request.respond(json_response(200, &body));
-                } else {
-                    let _ = request.respond(Response::empty(StatusCode(404)));
-                }
+    // If the port is taken the rest of the app (and an extension that already knows the
+    // port) keeps working, so this is reported in the status instead of failing startup.
+    match Server::http(("127.0.0.1", DISCOVERY_PORT)) {
+        Ok(discovery) => {
+            let discovery_state = state.clone();
+            std::thread::Builder::new()
+                .name("pdm-browser-discovery".into())
+                .spawn(move || {
+                    for request in discovery.incoming_requests() {
+                        if request.method() == &Method::Get && request.url() == "/v1/discover" {
+                            let paired = discovery_state
+                                .status()
+                                .map(|status| status.paired)
+                                .unwrap_or(false);
+                            let body = format!(
+                                "{{\"app\":\"pencil-download-manager\",\"port\":{port},\"paired\":{paired}}}"
+                            );
+                            let _ = request.respond(json_response(200, &body));
+                        } else {
+                            let _ = request.respond(Response::empty(StatusCode(404)));
+                        }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        Err(error) => {
+            if let Ok(mut security) = state.0.lock() {
+                security.discovery_error = Some(format!(
+                    "Port {DISCOVERY_PORT} is in use by another program ({error}). \
+                     Close it and restart Pencil so browsers can find the app."
+                ));
             }
-        })
-        .map_err(|e| e.to_string())?;
+        }
+    }
 
     Ok(state)
 }
 
-fn write_private_config(path: &Path, port: u16, token: &str) -> Result<(), String> {
-    let bytes = serde_json::to_vec(&serde_json::json!({
-        "port": port,
-        "token": token
-    }))
-    .map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// A stored config is only trusted when it is well formed; a hand-edited or
+/// truncated file falls back to a fresh token and a new pairing.
+fn load_config(path: &Path) -> Option<StoredConfig> {
+    let bytes = std::fs::read(path).ok()?;
+    let config: StoredConfig = serde_json::from_slice(&bytes).ok()?;
+    let token_ok = config.token.len() == 64 && config.token.bytes().all(|b| b.is_ascii_hexdigit());
+    let origin_ok = config
+        .origin
+        .as_deref()
+        .map_or(true, valid_extension_origin);
+    (token_ok && origin_ok).then_some(config)
+}
+
+fn persist(state: &SecurityState) -> Result<(), String> {
+    match &state.config_path {
+        Some(path) => write_private_config(
+            path,
+            &StoredConfig {
+                port: state.port,
+                token: state.token.clone(),
+                origin: state.allowed_origin.clone(),
+            },
+        ),
+        None => Ok(()),
+    }
+}
+
+fn write_private_config(path: &Path, config: &StoredConfig) -> Result<(), String> {
+    let bytes = serde_json::to_vec(config).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, &bytes).map_err(|e| e.to_string())?;
     }
     #[cfg(windows)]
     {
@@ -230,6 +375,12 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
         }
         security.pairing = None;
         security.allowed_origin = Some(parsed.origin);
+        security.last_seen = Some(now_secs());
+        if let Err(message) = persist(&security) {
+            security.allowed_origin = None;
+            let _ = req.respond(error_response(500, &message));
+            return;
+        }
         let body = serde_json::to_string(&PairResponse {
             token: security.token.clone(),
             port: security.port,
@@ -240,7 +391,7 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
     }
 
     {
-        let security = match state.0.lock() {
+        let mut security = match state.0.lock() {
             Ok(security) => security,
             Err(_) => {
                 let _ = req.respond(error_response(500, "internal error"));
@@ -259,6 +410,7 @@ fn handle_request(mut req: Request, state: &BrowserState, app: &tauri::AppHandle
             let _ = req.respond(error_response(403, "pair the browser extension first"));
             return;
         }
+        security.last_seen = Some(now_secs());
     }
 
     if method == Method::Get && path == "/v1/ping" {
@@ -671,5 +823,56 @@ mod tests {
             &code,
             Instant::now()
         ));
+    }
+
+    #[test]
+    fn stored_config_round_trips_and_rejects_damaged_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("browser-connection.json");
+        let token = "a".repeat(64);
+        write_private_config(
+            &path,
+            &StoredConfig {
+                port: 4242,
+                token: token.clone(),
+                origin: Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop".into()),
+            },
+        )
+        .unwrap();
+        let loaded = load_config(&path).expect("valid config loads");
+        assert_eq!(loaded.token, token);
+        assert_eq!(loaded.port, 4242);
+        assert!(loaded.origin.is_some());
+
+        std::fs::write(&path, b"{\"port\":1,\"token\":\"short\"}").unwrap();
+        assert!(load_config(&path).is_none());
+        std::fs::write(
+            &path,
+            format!("{{\"port\":1,\"token\":\"{token}\",\"origin\":\"https://evil.test\"}}"),
+        )
+        .unwrap();
+        assert!(load_config(&path).is_none());
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(load_config(&path).is_none());
+    }
+
+    #[test]
+    fn disconnect_rotates_token_and_clears_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = BrowserState::new(1234, "a".repeat(64));
+        {
+            let mut security = state.0.lock().unwrap();
+            security.config_path = Some(dir.path().join("browser-connection.json"));
+            security.allowed_origin = Some("chrome-extension://abc".into());
+        }
+        assert!(state.status().unwrap().paired);
+        state.disconnect().unwrap();
+        let status = state.status().unwrap();
+        assert!(!status.paired);
+        let security = state.0.lock().unwrap();
+        assert_ne!(security.token, "a".repeat(64));
+        let saved = load_config(security.config_path.as_ref().unwrap()).unwrap();
+        assert_eq!(saved.token, security.token);
+        assert!(saved.origin.is_none());
     }
 }

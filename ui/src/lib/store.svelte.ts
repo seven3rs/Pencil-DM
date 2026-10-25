@@ -39,6 +39,8 @@ export class DownloadStore {
   private speeds = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
+  /** True while the visible error came from a failed poll, so the next good poll can clear it. */
+  private pollFailed = false;
   private cleanups: Array<() => void> = [];
 
   constructor(
@@ -101,10 +103,15 @@ export class DownloadStore {
     this.polling = true;
     try {
       this.items = enrich(await this.api.listDownloads(), this.speeds);
+      if (this.pollFailed) {
+        this.pollFailed = false;
+        this.say("");
+      }
       if (this.selectedGid && !this.items.some((d) => d.gid === this.selectedGid)) {
         this.selectedGid = null;
       }
     } catch (e) {
+      this.pollFailed = true;
       this.say(String(e), true);
     } finally {
       this.polling = false;

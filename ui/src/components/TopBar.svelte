@@ -3,7 +3,7 @@
   import type { DownloadStore } from "../lib/store.svelte";
   import { tauriApi } from "../lib/api";
 
-  let { store, onadd, onscheduler, onabout }: { store: DownloadStore; onadd: () => void; onscheduler: () => void; onabout: () => void } = $props();
+  let { store, onadd, onscheduler, onabout, onbrowser, browserPaired = false }: { store: DownloadStore; onadd: () => void; onscheduler: () => void; onabout: () => void; onbrowser: () => void; browserPaired?: boolean } = $props();
   let limiterEnabled = $state(false);
   let limitKib = $state(1024);
   let settingsLoaded = $state(false);
@@ -45,8 +45,8 @@
 
 <header class="topbar">
   <div class="brand">
-    <span class="logo" aria-hidden="true"></span>
-    <h1>Pencil Download Manager</h1>
+    <img class="logo" src="/logo.svg" alt="" width="32" height="32" />
+    <h1><b>Pencil</b> <span>Download Manager</span></h1>
   </div>
   <span class="badge {store.engine.state}" role="status">{label}</span>
   <label class="speed-toggle">
@@ -57,6 +57,9 @@
     KiB/s
     <input type="number" min="1" max="1048576" bind:value={limitKib} disabled={!store.ready} />
   </label>
+  <button type="button" onclick={onbrowser} title={browserPaired ? "Browser extension connected" : "Connect your browser"}>
+    Browser{#if browserPaired}<span class="paired-dot" aria-label="connected"></span>{/if}
+  </button>
   <button type="button" onclick={onscheduler}>Scheduler</button>
   <button type="button" onclick={onabout}>About</button>
   <button type="button" class="primary" onclick={onadd} disabled={!store.ready} title="Add URL (Ctrl/Cmd+N)">

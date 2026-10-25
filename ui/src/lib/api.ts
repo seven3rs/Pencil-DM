@@ -21,7 +21,17 @@ export interface Aria2About { version: string; tag: string; source_url: string; 
 
 export interface ScheduleRule { id: string; name: string; days: number[]; start_time: string; stop_time: string; timezone: string; speed_limit: number | null; enabled: boolean; }
 
+export interface BrowserStatus { paired: boolean; origin: string | null; last_seen: number | null; port: number; discovery_ok: boolean; discovery_error: string | null; }
+export interface BrowserInfo { id: string; name: string; family: "chromium" | "firefox"; installed: boolean; }
+
 type ExtendedApi = Api & {
+  createBrowserPairingCode(): Promise<string>;
+  getBrowserStatus(): Promise<BrowserStatus>;
+  disconnectBrowser(): Promise<void>;
+  listBrowsers(): Promise<BrowserInfo[]>;
+  prepareExtension(family: string): Promise<string>;
+  openBrowserExtensions(browser: string): Promise<string>;
+  revealExtensionFolder(family: string): Promise<void>;
   getSettings(): Promise<[string, string][]>;
   setSpeedLimiter(enabled: boolean, bytesPerSecond: number): Promise<void>;
   setDownloadSpeedLimit(gid: string, bytesPerSecond: number | null): Promise<void>;
@@ -52,6 +62,13 @@ type ExtendedApi = Api & {
 };
 
 export const tauriApi: ExtendedApi = {
+  createBrowserPairingCode: () => invoke<string>("create_browser_pairing_code"),
+  getBrowserStatus: () => invoke<BrowserStatus>("get_browser_status"),
+  disconnectBrowser: () => invoke("disconnect_browser"),
+  listBrowsers: () => invoke<BrowserInfo[]>("list_browsers"),
+  prepareExtension: (family) => invoke<string>("prepare_extension", { family }),
+  openBrowserExtensions: (browser) => invoke<string>("open_browser_extensions", { browser }),
+  revealExtensionFolder: (family) => invoke("reveal_extension_folder", { family }),
   listDownloads: () => invoke<RawDownload[]>("list_downloads"),
   addDownload: (url) => invoke<string>("add_download", { url }),
   pauseDownload: (gid) => invoke("pause_download", { gid }),
