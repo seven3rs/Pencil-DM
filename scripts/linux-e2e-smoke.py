@@ -30,12 +30,12 @@ class QuietHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-def request(method, path, payload=None):
+def request(method, path, payload=None, timeout=3):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{DRIVER_PORT}{path}", data=data, method=method,
         headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         # WebDriver's 500 response usually contains the useful launch failure;
@@ -83,8 +83,16 @@ def main():
                 "tauri-driver",
                 timeout=20,
             )
-            created = wait_for(lambda: request("POST", "/session", {"capabilities": {"alwaysMatch": {
-                "browserName": "wry", "tauri:options": {"application": str(APP)}}}}), "application session")
+            # WebKitGTK's WebDriver backend only allows one session-creation
+            # request in flight at a time. App startup (first paint under
+            # Xvfb) can comfortably exceed a few seconds on a loaded CI
+            # runner, so retrying this POST through wait_for()'s short
+            # per-attempt timeout would let one retry fire while the prior
+            # request is still being processed server-side, which webkit2gtk
+            # then rejects with "Maximum number of active sessions". Use a
+            # single request with a generous timeout instead of retrying.
+            created = request("POST", "/session", {"capabilities": {"alwaysMatch": {
+                "browserName": "wry", "tauri:options": {"application": str(APP)}}}}, timeout=90)
             session = created.get("value", {}).get("sessionId") or created.get("sessionId")
             if not session:
                 raise RuntimeError(f"WebDriver did not return a session ID: {created}")

@@ -1,0 +1,24 @@
+# cargo-audit configuration.
+#
+# See: https://docs.rs/cargo-audit
+#
+# `pdm-engine`'s own `zip` dependency has been bumped to `>=9` (the fixed
+# line), which removes zip 2.6.1 from the dependency graph entirely.
+#
+# The remaining three advisories below (RUSTSEC-2026-0367/0368/0369) apply to
+# zip 4.6.1, which is pulled in transitively by `tauri-plugin-updater 2.14.0`
+# (the latest release available at the time of writing). We do not control
+# that pin, and `tauri-plugin-updater` has not yet published a release that
+# depends on a fixed `zip`. There is no upgrade or patch we can apply from
+# this repo to remove the vulnerable version from the lockfile.
+#
+# These three IDs are ignored here as a documented, accepted risk rather than
+# silently failing CI on a dependency we cannot fix. Revisit and remove this
+# ignore list once `tauri-plugin-updater` ships a release built against
+# `zip >= 9` (track https://github.com/tauri-apps/plugins-workspace).
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0367", # zip 4.6.1 (transitive via tauri-plugin-updater) - upstream fix pending
+    "RUSTSEC-2026-0368", # zip 4.6.1 (transitive via tauri-plugin-updater) - upstream fix pending
+    "RUSTSEC-2026-0369", # zip 4.6.1 (transitive via tauri-plugin-updater) - upstream fix pending
+]

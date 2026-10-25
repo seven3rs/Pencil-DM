@@ -902,7 +902,12 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             permissions.set_mode(permissions.mode() | 0o200);
         }
+        // This branch only ever compiles on non-Unix targets, where `set_readonly(false)`
+        // clears the platform's read-only attribute and does not grant world-write access
+        // (that Unix-specific pitfall is what the lint guards against). The Unix case above
+        // already uses `PermissionsExt` directly instead.
         #[cfg(not(unix))]
+        #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
         fs::set_permissions(&bin, permissions).unwrap();
         fs::write(&bin, b"tampered").unwrap();
