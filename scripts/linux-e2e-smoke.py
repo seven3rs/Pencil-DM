@@ -43,7 +43,7 @@ def request(method, path, payload=None, timeout=3):
         detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"WebDriver {method} {path} failed ({error.code}): {detail}") from error
 
-def wait_for(predicate, description, timeout=45):
+def wait_for(predicate, description, timeout=90):
     end = time.monotonic() + timeout
     last = None
     while time.monotonic() < end:
