@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Installer names come from the committed version, not the tag. Fail before any
+      # draft release or build exists if the tag and the files disagree.
+      # Fix with: node scripts/set-version.mjs <version>, commit, and re-tag.
+      - name: Tag matches the committed version
+        if: github.ref_type == 'tag'
+        run: node scripts/check-versions.mjs --tag "$GITHUB_REF_NAME"
       - run: bash scripts/verify-manifest.sh
 
   prepare-release:

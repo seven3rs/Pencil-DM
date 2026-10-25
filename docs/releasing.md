@@ -76,8 +76,8 @@ Tauri uses these environment variables to sign and notarize the macOS bundles. I
 ## 3. Cut a release
 
 1. Ensure CI is green on the commit to release.
-2. Update the version consistently in `package.json`, `package-lock.json`, and `src-tauri/tauri.conf.json` (and update `CHANGELOG.md`). Keep the version as SemVer.
-3. Commit the version and changelog changes.
+2. Set the version everywhere with `node scripts/set-version.mjs 0.2.0` (SemVer; a leading `v` is accepted). It updates both `Cargo.toml` files, `Cargo.lock`, `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json` and both extension manifests. Then add a `## 0.2.0` section to `CHANGELOG.md`; the release notes step looks it up by that heading.
+3. Commit the version and changelog changes. `node scripts/check-versions.mjs --tag v0.2.0` confirms everything agrees.
 4. Create and push a version tag, for example:
 
    ```sh
@@ -85,7 +85,7 @@ Tauri uses these environment variables to sign and notarize the macOS bundles. I
    git push origin v0.2.0
    ```
 
-5. The release workflow builds Windows x64, Linux x64, macOS Intel and macOS Apple Silicon. Every matrix build uploads to a **draft** GitHub release. The final `publish` job runs only if the manifest check and every matrix build succeed; it checks for `latest.json` when updater signing is enabled and then publishes the draft.
+5. The release workflow first checks that the tag matches the committed version and stops before creating a draft or building anything if it does not (installer file names come from the committed version, not the tag). If that happens, delete the tag, rerun `set-version.mjs`, commit, and tag again. It then builds Windows x64, Linux x64, macOS Intel and macOS Apple Silicon. Every matrix build uploads to a **draft** GitHub release. The final `publish` job runs only if the manifest check and every matrix build succeed; it checks for `latest.json` when updater signing is enabled and then publishes the draft.
 6. Check the published release page. An updater-enabled release must contain `latest.json`, the platform update payloads and their `.sig` files. The release assets and `latest.json` must be publicly downloadable for the default updater endpoint to work.
 
 Do not re-use a published tag for a different build. Create a new version and tag for each release. GitHub release downloads are used by the updater; private repositories are not anonymously readable by installed clients. For a fork test, change `plugins.updater.endpoints` to that fork's public release URL before building the test version. Do not embed a personal access token in the app to access a private release.
@@ -96,7 +96,7 @@ Use a disposable test machine or VM and a public test fork with its own updater 
 
 1. In the fork, generate its own updater key pair and set the matching public key in `src-tauri/tauri.conf.json`. Add the private key and password as the fork's Actions secrets. Change the updater endpoint to `https://github.com/OWNER/Pencil-Download-Manager/releases/latest/download/latest.json`, using the fork owner/repository.
 2. Build and publish version **N** with the fork workflow. Download and install that release's installer on the test machine. Confirm About → Check for updates reports that no update is available.
-3. Increment the app version to **N+1** in `package.json`, `package-lock.json`, and `src-tauri/tauri.conf.json`; add a `CHANGELOG.md` entry; commit and push a new tag such as `v0.2.1`.
+3. Increment the app version to **N+1** with `node scripts/set-version.mjs`; add a `CHANGELOG.md` entry; commit and push a new tag such as `v0.2.1`.
 4. Wait for all release matrix jobs and the final publish job to succeed. Confirm `latest.json` includes the current version and platform entries and that its payload URLs and signatures are present in the release assets.
 5. Launch the installed N build and select About → **Check for updates**. Confirm the N+1 changelog appears. Choose **Restart to update**; if downloads are active or queued, the app must ask for confirmation before installing. After restart, confirm About reports N+1.
 6. Also test the unsigned path by running a release workflow without `TAURI_SIGNING_PRIVATE_KEY`: installers should still build and the release should publish, but updater artifacts and `latest.json` are intentionally omitted. This verifies unsigned installation compatibility, not automatic updates.

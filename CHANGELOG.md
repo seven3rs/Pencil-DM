@@ -9,6 +9,7 @@
 - A busy discovery port no longer stops the whole app from starting.
 - Fixed the tray: right-clicking the icon no longer re-opens the hidden window or closes the menu; only a left click restores the window.
 - A failed engine poll no longer leaves a stuck error banner.
+- Release workflow: new `scripts/set-version.mjs` bumps the version in every file at once, and the workflow now refuses a tag that does not match the committed version (previously a `v0.1.1` tag produced installers named 0.1.0).
 - Release workflow: fixed the bundle folder used by the installers-only guard and skipped empty Apple signing secrets.
 
 ## 0.1.0
