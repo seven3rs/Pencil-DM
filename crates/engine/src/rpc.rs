@@ -280,9 +280,28 @@ fn safe_output_name(value: &str) -> bool {
     let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
     !matches!(
         stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
-            | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
-            | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     )
 }
 
@@ -326,6 +345,7 @@ fn parse_info(v: &Value) -> DownloadInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn builds_global_and_per_download_limit_options() {
@@ -402,15 +422,37 @@ mod tests {
     fn filename_validation_property_rejects_ascii_controls_and_separators() {
         for byte in 0u8..=31 {
             let candidate = format!("prefix{}suffix", char::from(byte));
-            assert!(!safe_output_name(&candidate), "accepted control byte {byte}");
+            assert!(
+                !safe_output_name(&candidate),
+                "accepted control byte {byte}"
+            );
         }
         for separator in ['/', '\\', ':'] {
             let candidate = format!("prefix{separator}suffix");
-            assert!(!safe_output_name(&candidate), "accepted separator {separator:?}");
+            assert!(
+                !safe_output_name(&candidate),
+                "accepted separator {separator:?}"
+            );
         }
         for suffix in ['.', ' '] {
             let candidate = format!("filename{suffix}");
-            assert!(!safe_output_name(&candidate), "accepted unsafe suffix {suffix:?}");
+            assert!(
+                !safe_output_name(&candidate),
+                "accepted unsafe suffix {suffix:?}"
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn accepted_output_names_have_no_path_or_windows_ambiguity(name in any::<String>()) {
+            if safe_output_name(&name) {
+                prop_assert!(!name.is_empty());
+                prop_assert!(name.len() <= 240);
+                prop_assert!(!name.contains(['/', '\\', ':']));
+                prop_assert!(!name.ends_with(['.', ' ']));
+                prop_assert!(!name.chars().any(char::is_control));
+            }
         }
     }
 

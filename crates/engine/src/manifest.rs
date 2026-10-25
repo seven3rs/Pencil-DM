@@ -230,9 +230,28 @@ fn is_safe_relative(p: &str) -> bool {
             let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
             !matches!(
                 stem.as_str(),
-                "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4"
-                    | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2"
-                    | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+                "CON"
+                    | "PRN"
+                    | "AUX"
+                    | "NUL"
+                    | "COM1"
+                    | "COM2"
+                    | "COM3"
+                    | "COM4"
+                    | "COM5"
+                    | "COM6"
+                    | "COM7"
+                    | "COM8"
+                    | "COM9"
+                    | "LPT1"
+                    | "LPT2"
+                    | "LPT3"
+                    | "LPT4"
+                    | "LPT5"
+                    | "LPT6"
+                    | "LPT7"
+                    | "LPT8"
+                    | "LPT9"
             )
         })
 }
@@ -240,6 +259,7 @@ fn is_safe_relative(p: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn embedded_manifest_is_valid_and_has_windows_entries() {
@@ -287,8 +307,12 @@ mod tests {
                     "bin": path,
                     "bin_sha256": digest
                 }}
-            }).to_string();
-            assert!(EngineManifest::parse(&json).is_err(), "accepted manifest path {path:?}");
+            })
+            .to_string();
+            assert!(
+                EngineManifest::parse(&json).is_err(),
+                "accepted manifest path {path:?}"
+            );
         }
         for malformed in ["", "not-json", "{", "null", "[]", r#"{"version":1}"#] {
             assert!(
@@ -300,8 +324,17 @@ mod tests {
 
     #[test]
     fn stable_release_tags_reject_suffixes_and_non_numeric_components() {
-        for tag in ["release-1.2.3-rc1", "v1..2", "1.2.x", "https://evil.test/1.2.3", ""] {
-            assert!(parse_release_tag(tag).is_none(), "accepted release tag {tag:?}");
+        for tag in [
+            "release-1.2.3-rc1",
+            "v1..2",
+            "1.2.x",
+            "https://evil.test/1.2.3",
+            "",
+        ] {
+            assert!(
+                parse_release_tag(tag).is_none(),
+                "accepted release tag {tag:?}"
+            );
         }
     }
 
@@ -332,15 +365,21 @@ mod tests {
                     "bin": "engine.exe",
                     "bin_sha256": digest
                 }}
-            }).to_string();
-            assert!(EngineManifest::parse(&json).is_err(), "accepted unsafe version {version:?}");
+            })
+            .to_string();
+            assert!(
+                EngineManifest::parse(&json).is_err(),
+                "accepted unsafe version {version:?}"
+            );
         }
     }
 
     #[test]
     fn rejects_manifest_urls_with_embedded_credentials() {
         let digest = "0".repeat(64);
-        let json = format!(r#"{{"version":"1","min_system_version":"1.36.0","platforms":{{"k":{{"url":"https://user:pass@example.test/a.zip","sha256":"{digest}","bin":"engine.exe","bin_sha256":"{digest}"}}}}}}"#);
+        let json = format!(
+            r#"{{"version":"1","min_system_version":"1.36.0","platforms":{{"k":{{"url":"https://user:pass@example.test/a.zip","sha256":"{digest}","bin":"engine.exe","bin_sha256":"{digest}"}}}}}}"#
+        );
         assert!(EngineManifest::parse(&json).is_err());
     }
 
@@ -359,5 +398,12 @@ mod tests {
             r#"{{"version":"../1","min_system_version":"1.36.0","platforms":{{"k":{{"url":"https://x/y.zip","sha256":"{good}","bin":"a.exe","bin_sha256":"{good}"}}}}}}"#
         );
         assert!(EngineManifest::parse(&ver).is_err());
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_manifest_input_never_panics(input in any::<String>()) {
+            let _ = EngineManifest::parse(&input);
+        }
     }
 }

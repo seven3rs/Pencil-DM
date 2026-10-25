@@ -74,6 +74,26 @@ jobs:
       - name: Tests
         run: cargo test -p pdm-engine
 
+  windows-real-archive:
+    name: engine real Windows archive layout
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Download the manifest-pinned Windows archive
+        shell: pwsh
+        run: |
+          $manifest = Get-Content engine-manifest.json -Raw | ConvertFrom-Json
+          $entry = $manifest.platforms.'windows-x86_64'
+          $archive = Join-Path $env:RUNNER_TEMP 'aria2-windows.zip'
+          Invoke-WebRequest -Uri $entry.url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $entry.sha256.ToLowerInvariant()) { throw 'Downloaded archive hash does not match engine-manifest.json' }
+          "PDM_REAL_WINDOWS_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Verify actual archive layout through the hardened extractor
+        run: cargo test -p pdm-engine installs_real_windows_archive_when_supplied_by_ci -- --exact
+
   ui:
     name: ui (type-check, tests, build)
     runs-on: ubuntu-latest

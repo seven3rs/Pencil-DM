@@ -107,8 +107,8 @@ pub async fn download_verified<P>(
 where
     P: Fn(u64, Option<u64>) + Send + Sync,
 {
-    let parsed_url = reqwest::Url::parse(url)
-        .map_err(|_| EngineError::InsecureUrl(url.to_string()))?;
+    let parsed_url =
+        reqwest::Url::parse(url).map_err(|_| EngineError::InsecureUrl(url.to_string()))?;
     if parsed_url.scheme() != "https"
         || parsed_url.host_str().is_none()
         || !parsed_url.username().is_empty()
@@ -173,10 +173,7 @@ where
 }
 
 fn redirect_is_allowed(source_host: Option<&str>, target: &reqwest::Url) -> bool {
-    if target.scheme() != "https"
-        || !target.username().is_empty()
-        || target.password().is_some()
-    {
+    if target.scheme() != "https" || !target.username().is_empty() || target.password().is_some() {
         return false;
     }
     let target_host = target.host_str();
@@ -196,7 +193,11 @@ pub fn install_from_archive(
     entry: &PlatformEntry,
 ) -> Result<PathBuf> {
     manifest.validate()?;
-    if !manifest.platforms.values().any(|candidate| candidate == entry) {
+    if !manifest
+        .platforms
+        .values()
+        .any(|candidate| candidate == entry)
+    {
         return Err(EngineError::Manifest(
             "platform entry does not belong to the validated manifest".into(),
         ));
@@ -247,10 +248,15 @@ fn extract_and_swap(
             Some(p) => p,
             None => return Err(EngineError::UnsafeArchive(raw_name)),
         };
+        if file.is_symlink() {
+            return Err(EngineError::UnsafeArchive(format!("symlink {raw_name}")));
+        }
         if let Some(mode) = file.unix_mode() {
             let kind = mode & 0o170000;
             if kind == 0o120000 || (kind != 0 && kind != 0o100000 && kind != 0o040000) {
-                return Err(EngineError::UnsafeArchive(format!("special file {raw_name}")));
+                return Err(EngineError::UnsafeArchive(format!(
+                    "special file {raw_name}"
+                )));
             }
         }
         let rel = match prefix {
@@ -287,13 +293,10 @@ fn extract_and_swap(
         }
         if !is_dir
             && parts.len() > 1
-            && parts[..parts.len() - 1]
-                .iter()
-                .enumerate()
-                .any(|(idx, _)| {
-                    let parent = parts[..idx + 1].join("/");
-                    seen.get(&parent) == Some(&false)
-                })
+            && parts[..parts.len() - 1].iter().enumerate().any(|(idx, _)| {
+                let parent = parts[..idx + 1].join("/");
+                seen.get(&parent) == Some(&false)
+            })
         {
             return Err(EngineError::UnsafeArchive(format!(
                 "file/directory collision {raw_name}"
@@ -318,10 +321,15 @@ fn extract_and_swap(
         }
         // Never silently overwrite an earlier entry, even if the ZIP library
         // or filesystem treats the names differently.
-        let mut out_file = fs::OpenOptions::new().write(true).create_new(true).open(&dest)?;
+        let mut out_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&dest)?;
         let copied = io::copy(&mut file, &mut out_file)?;
         if copied != file.size() {
-            return Err(EngineError::UnsafeArchive(format!("size mismatch for {raw_name}")));
+            return Err(EngineError::UnsafeArchive(format!(
+                "size mismatch for {raw_name}"
+            )));
         }
     }
 
@@ -339,7 +347,17 @@ fn extract_and_swap(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755))?;
+        // A managed binary never needs to be modified after verification.  This
+        // does not defeat a same-user attacker who can rename files in the
+        // containing directory, but reduces accidental modification and narrows
+        // the useful TOCTOU surface before the launch-time hash check.
+        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o555))?;
+    }
+    #[cfg(windows)]
+    {
+        let mut permissions = fs::metadata(&staged_bin)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&staged_bin, permissions)?;
     }
 
     let final_dir = engine_dir(root, &manifest.version);
@@ -391,15 +409,37 @@ fn archive_name_is_safe(name: &str) -> bool {
         let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
         !matches!(
             stem.as_str(),
-            "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4"
-                | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2"
-                | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+            "CON"
+                | "PRN"
+                | "AUX"
+                | "NUL"
+                | "COM1"
+                | "COM2"
+                | "COM3"
+                | "COM4"
+                | "COM5"
+                | "COM6"
+                | "COM7"
+                | "COM8"
+                | "COM9"
+                | "LPT1"
+                | "LPT2"
+                | "LPT3"
+                | "LPT4"
+                | "LPT5"
+                | "LPT6"
+                | "LPT7"
+                | "LPT8"
+                | "LPT9"
         )
     })
 }
 
 fn collision_key(path: &Path) -> Result<String> {
-    if path.components().any(|c| !matches!(c, Component::Normal(_))) {
+    if path
+        .components()
+        .any(|c| !matches!(c, Component::Normal(_)))
+    {
         return Err(EngineError::UnsafeArchive(path.display().to_string()));
     }
     let key = path.to_string_lossy().replace('\\', "/");
@@ -413,6 +453,7 @@ fn collision_key(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Write;
 
     fn sha(bytes: &[u8]) -> String {
@@ -479,6 +520,59 @@ mod tests {
         assert!(leftovers.is_empty());
     }
 
+    proptest! {
+        // Every generated archive is either rejected or remains contained in
+        // the staging tree.  The sentinel represents an arbitrary neighbouring
+        // file that extraction must never overwrite.
+        #[test]
+        fn extract_generated_names_never_escape_or_overwrite(
+            names in proptest::collection::vec("[A-Za-z0-9./\\\\ :]{0,40}", 0..12)
+        ) {
+            let tmp = tempfile::tempdir().unwrap();
+            let sentinel = tmp.path().join("sentinel.txt");
+            fs::write(&sentinel, b"untouched").unwrap();
+            let mut entries: Vec<(String, Vec<u8>)> =
+                vec![("pkg/engine.bin".into(), b"engine-bytes".to_vec())];
+            for (index, name) in names.into_iter().enumerate() {
+                entries.push((name, format!("data-{index}").into_bytes()));
+            }
+            let zip_path = tmp.path().join("generated.zip");
+            let mut writer = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            for (name, data) in &entries {
+                // zip's writer rejects a few malformed raw names; those are not
+                // extraction inputs, so skip just that generated case.
+                if writer.start_file(name, options).is_ok() {
+                    writer.write_all(data).unwrap();
+                }
+            }
+            writer.finish().unwrap();
+            let entry = PlatformEntry {
+                url: "https://example.invalid/engine.zip".into(),
+                sha256: sha256_file(&zip_path).unwrap(),
+                extract_dir: Some("pkg".into()), bin: "engine.bin".into(),
+                bin_sha256: sha(b"engine-bytes"), max_bytes: None,
+            };
+            let manifest = EngineManifest { version: "9.9.9".into(), min_system_version: "1.36.0".into(), platforms: [("test".to_string(), entry.clone())].into_iter().collect() };
+            let _ = install_from_archive(&zip_path, &tmp.path().join("root"), &manifest, &entry);
+            prop_assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+        }
+    }
+
+    #[test]
+    fn installs_real_windows_archive_when_supplied_by_ci() {
+        let Ok(archive) = std::env::var("PDM_REAL_WINDOWS_ARCHIVE") else {
+            return;
+        };
+        let manifest = EngineManifest::embedded().unwrap();
+        let entry = manifest.platforms.get("windows-x86_64").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let installed =
+            install_from_archive(Path::new(&archive), tmp.path(), &manifest, entry).unwrap();
+        assert!(installed.is_file());
+        assert!(is_installed(tmp.path(), &manifest, entry));
+    }
+
     #[test]
     fn failed_reinstall_preserves_previous_verified_installation() {
         let tmp = tempfile::tempdir().unwrap();
@@ -506,7 +600,10 @@ mod tests {
         let error = install_from_archive(&bad_zip, &root, &bad_manifest, &bad_entry).unwrap_err();
         assert!(matches!(error, EngineError::HashMismatch { .. }));
         assert_eq!(fs::read(&installed).unwrap(), b"engine-bytes");
-        assert_eq!(fs::read(installed.parent().unwrap().join("preserve.txt")).unwrap(), b"keep");
+        assert_eq!(
+            fs::read(installed.parent().unwrap().join("preserve.txt")).unwrap(),
+            b"keep"
+        );
     }
 
     #[test]
@@ -519,6 +616,10 @@ mod tests {
             b"engine-bytes",
         );
         entry.sha256 = "0".repeat(64);
+        let manifest = EngineManifest {
+            platforms: [("test".into(), entry.clone())].into_iter().collect(),
+            ..manifest
+        };
         let root = tmp.path().join("root");
         let err = install_from_archive(&zip, &root, &manifest, &entry).unwrap_err();
         assert!(matches!(err, EngineError::HashMismatch { .. }));
@@ -582,8 +683,17 @@ mod tests {
             for second in atoms {
                 let candidate = format!("{first}/{second}/file.bin");
                 if [first, second].iter().any(|part| {
-                    ["..", ".", "CON", "NUL.txt", "trailing.", "trailing ", "C:", "\\evil"]
-                        .contains(part)
+                    [
+                        "..",
+                        ".",
+                        "CON",
+                        "NUL.txt",
+                        "trailing.",
+                        "trailing ",
+                        "C:",
+                        "\\evil",
+                    ]
+                    .contains(part)
                 }) {
                     assert!(
                         !archive_name_is_safe(&candidate),
@@ -614,6 +724,27 @@ mod tests {
         writer.start_file("pkg/link", options).unwrap();
         writer.write_all(b"../../outside").unwrap();
         writer.finish().unwrap();
+        // ZipWriter intentionally stores only permission bits. Patch the
+        // central-directory entry to model the Unix symlink type emitted by
+        // external archive tools.
+        let mut bytes = fs::read(&zip_path).unwrap();
+        let mut patched = false;
+        for offset in 0..bytes.len().saturating_sub(46) {
+            if bytes[offset..].starts_with(b"PK\x01\x02") {
+                let name_len =
+                    u16::from_le_bytes([bytes[offset + 28], bytes[offset + 29]]) as usize;
+                let name_start = offset + 46;
+                if bytes.get(name_start..name_start + name_len) == Some(b"pkg/link") {
+                    bytes[offset + 5] = 3; // Unix creator OS
+                    bytes[offset + 38..offset + 42]
+                        .copy_from_slice(&(0o120777u32 << 16).to_le_bytes());
+                    patched = true;
+                    break;
+                }
+            }
+        }
+        assert!(patched, "symlink central-directory entry not found");
+        fs::write(&zip_path, bytes).unwrap();
         let entry = PlatformEntry {
             url: "https://example.invalid/a.zip".into(),
             sha256: sha256_file(&zip_path).unwrap(),
@@ -627,13 +758,8 @@ mod tests {
             min_system_version: "1.36.0".into(),
             platforms: [("test".into(), entry.clone())].into_iter().collect(),
         };
-        let err = install_from_archive(
-            &zip_path,
-            &tmp.path().join("root"),
-            &manifest,
-            &entry,
-        )
-        .unwrap_err();
+        let err = install_from_archive(&zip_path, &tmp.path().join("root"), &manifest, &entry)
+            .unwrap_err();
         assert!(matches!(err, EngineError::UnsafeArchive(_)));
     }
 
@@ -649,13 +775,8 @@ mod tests {
             "engine.bin",
             b"engine-bytes",
         );
-        let err = install_from_archive(
-            &zip,
-            &tmp.path().join("root"),
-            &manifest,
-            &entry,
-        )
-        .unwrap_err();
+        let err =
+            install_from_archive(&zip, &tmp.path().join("root"), &manifest, &entry).unwrap_err();
         assert!(matches!(err, EngineError::UnsafeArchive(_)));
     }
 
@@ -677,25 +798,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_archive_path_collisions_and_duplicate_entries() {
+    fn rejects_archive_file_directory_collisions() {
         let tmp = tempfile::tempdir().unwrap();
         let (zip, manifest, entry) = fixture(
             tmp.path(),
             &[
                 ("pkg/engine.bin", b"engine-bytes"),
                 ("pkg/readme.txt", b"one"),
-                ("pkg/readme.txt", b"two"),
+                ("pkg/readme.txt/child", b"two"),
             ],
             "engine.bin",
             b"engine-bytes",
         );
-        let err = install_from_archive(
-            &zip,
-            &tmp.path().join("root"),
-            &manifest,
-            &entry,
-        )
-        .unwrap_err();
+        let err =
+            install_from_archive(&zip, &tmp.path().join("root"), &manifest, &entry).unwrap_err();
         assert!(matches!(err, EngineError::UnsafeArchive(_)));
     }
 
@@ -727,14 +843,12 @@ mod tests {
             min_system_version: "1.36.0".into(),
             platforms: [("test".into(), entry.clone())].into_iter().collect(),
         };
-        let err = install_from_archive(
-            &zip_path,
-            &tmp.path().join("root"),
-            &manifest,
-            &entry,
-        )
-        .unwrap_err();
-        assert!(matches!(err, EngineError::TooLarge(MAX_EXTRACTED_FILE_BYTES)));
+        let err = install_from_archive(&zip_path, &tmp.path().join("root"), &manifest, &entry)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            EngineError::TooLarge(MAX_EXTRACTED_FILE_BYTES)
+        ));
     }
 
     #[test]
@@ -744,7 +858,10 @@ mod tests {
         let mut writer = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
         for i in 0..=MAX_ARCHIVE_ENTRIES {
             writer
-                .start_file(format!("pkg/f{i}"), zip::write::SimpleFileOptions::default())
+                .start_file(
+                    format!("pkg/f{i}"),
+                    zip::write::SimpleFileOptions::default(),
+                )
                 .unwrap();
             writer.write_all(b"x").unwrap();
         }
@@ -762,13 +879,8 @@ mod tests {
             min_system_version: "1.36.0".into(),
             platforms: [("test".into(), entry.clone())].into_iter().collect(),
         };
-        let err = install_from_archive(
-            &zip_path,
-            &tmp.path().join("root"),
-            &manifest,
-            &entry,
-        )
-        .unwrap_err();
+        let err = install_from_archive(&zip_path, &tmp.path().join("root"), &manifest, &entry)
+            .unwrap_err();
         assert!(matches!(err, EngineError::TooLarge(_)));
     }
 
@@ -784,6 +896,9 @@ mod tests {
         let root = tmp.path().join("root");
         let bin = install_from_archive(&zip, &root, &manifest, &entry).unwrap();
         assert!(is_installed(&root, &manifest, &entry));
+        let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&bin, permissions).unwrap();
         fs::write(&bin, b"tampered").unwrap();
         assert!(!is_installed(&root, &manifest, &entry));
     }
