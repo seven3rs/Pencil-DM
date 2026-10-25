@@ -19,7 +19,8 @@ const installer = {
 };
 // Directories Tauri uses internally; never uploaded, so ignored when scanning a bundle dir.
 const intermediate = new Set(["macos"]); // bundle/macos/*.app feeds the dmg
-const ignoredNames = new Set([".DS_Store"]);
+// bundle/dmg/ also holds create-dmg's helper files (bundle_dmg.sh, icon.icns); they are never uploaded.
+const ignoredNames = new Set([".DS_Store", "bundle_dmg.sh", "icon.icns"]);
 
 function classify(name, platforms, v) {
   if (compliance(v).includes(name)) return true;
